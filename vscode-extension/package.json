@@ -1,0 +1,60 @@
+{
+  "name": "multi-agent-dev-system",
+  "displayName": "Multi-Agent Dev System",
+  "description": "5-Agent Multi-Agent Software Development System UI panel for VS Code",
+  "version": "1.0.0",
+  "publisher": "antigravity",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onView:multiAgent.chatView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "multi-agent-sidebar",
+          "title": "Multi-Agent System",
+          "icon": "media/robot.svg"
+        }
+      ]
+    },
+    "views": {
+      "multi-agent-sidebar": [
+        {
+          "id": "multiAgent.chatView",
+          "name": "Agent 5 Chat & Project Manager",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "multiAgent.startServer",
+        "title": "Multi-Agent: Start Backend Server"
+      },
+      {
+        "command": "multiAgent.openState",
+        "title": "Multi-Agent: Open PROJECT_STATE.md"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "16.x",
+    "typescript": "^5.0.0"
+  }
+}
+

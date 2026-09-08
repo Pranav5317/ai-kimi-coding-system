@@ -1,0 +1,294 @@
+import os
+import sys
+import json
+import asyncio
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from config import config
+from llm import OllamaProvider
+from tools import WorkspaceSandbox, DevServerManager
+from state import ProjectStateManager
+from diary import CodeDiary
+from orchestration import Orchestrator
+from agents import (
+    FrontendAgent,
+    BackendAgent,
+    DataManagerAgent,
+    SupervisorAgent,
+    WorkspaceAgent
+)
+
+
+app = FastAPI(
+    title="Multi-Agent Software Development System API",
+    description="Backend API powering the VS Code Extension and Web UI for the 5-Agent team.",
+    version="1.0.0"
+)
+
+# Enable CORS for VS Code Webview and local origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class SystemCore:
+    """
+    Encapsulates state and agent instances for the multi-agent system server.
+    """
+
+    def __init__(self, workspace_path: Optional[str] = None):
+        if workspace_path:
+            config.set_workspace(workspace_path)
+
+        self.llm = OllamaProvider(
+            base_url=config.ollama_base_url,
+            model=config.default_model,
+            default_temperature=config.temperature
+        )
+        self.diary = CodeDiary(config.diary_file)
+        self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
+        self.server_manager = DevServerManager(workspace_root=config.workspace_dir, diary=self.diary)
+        self.state_manager = ProjectStateManager(sandbox=self.sandbox)
+        self.state_manager.onboard_existing_project()
+        self.orchestrator = Orchestrator()
+
+        # Agents
+        self.agent1 = FrontendAgent(llm_provider=self.llm, agent_id="agent1", orchestrator=self.orchestrator)
+        self.agent2 = BackendAgent(llm_provider=self.llm, agent_id="agent2", orchestrator=self.orchestrator, sandbox=self.sandbox, diary=self.diary)
+        self.agent3 = DataManagerAgent(llm_provider=self.llm, agent_id="agent3", orchestrator=self.orchestrator)
+        self.agent4 = SupervisorAgent(llm_provider=self.llm, agent_id="agent4", orchestrator=self.orchestrator)
+        self.agent5 = WorkspaceAgent(
+            llm_provider=self.llm,
+            agent_id="agent5",
+            name="Agent 5 (Workspace Manager)",
+            role="workspace_manager",
+            system_prompt=config.agent5_system_prompt,
+            sandbox=self.sandbox,
+            diary=self.diary,
+            server_manager=self.server_manager,
+            state_manager=self.state_manager,
+            orchestrator=self.orchestrator
+        )
+
+        # Register agents
+        for agent in (self.agent1, self.agent2, self.agent3, self.agent4, self.agent5):
+            self.orchestrator.register_agent(
+                agent_id=agent.agent_id,
+                role=agent.role,
+                capabilities=agent.capabilities,
+                handler=agent.handle_agent_message
+            )
+        self.orchestrator.register_observer(self.agent4.observe_message)
+
+
+# Global core instance
+core: Optional[SystemCore] = None
+
+
+@app.on_event("startup")
+def startup_event():
+    global core
+    if core is None:
+        core = SystemCore()
+
+
+@app.get("/api/health")
+def get_health():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    is_healthy, health_msg = core.llm.health_check()
+    return {
+        "status": "online" if is_healthy else "degraded",
+        "llm_health": health_msg,
+        "model": config.default_model,
+        "workspace_dir": str(config.workspace_dir)
+    }
+
+
+@app.get("/api/agents")
+def list_agents():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    agents = []
+    for reg in core.orchestrator.registry.list_agents():
+        agents.append({
+            "agent_id": reg.agent_id,
+            "role": reg.role,
+            "capabilities": sorted(list(reg.capabilities)) if reg.capabilities else []
+        })
+    return {"agents": agents}
+
+
+@app.get("/api/state")
+def get_project_state():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    state_text = core.state_manager.read_state()
+    return {"content": state_text}
+
+
+@app.get("/api/files")
+def list_workspace_files():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    file_list = core.sandbox.list_files(".")
+    return {"files": file_list}
+
+
+@app.get("/api/diary")
+def get_diary_entries(limit: int = 20):
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    if not config.diary_file.exists():
+        return {"entries": []}
+    lines = config.diary_file.read_text(encoding="utf-8").strip().splitlines()
+    recent = lines[-limit:] if len(lines) > limit else lines
+    return {"entries": recent}
+
+
+@app.post("/api/chat")
+async def chat_endpoint(payload: Dict[str, Any]):
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    prompt = payload.get("prompt", "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+
+    tool_executions = []
+
+    def on_tool(name: str, args: dict, result: str):
+        tool_executions.append({"tool": name, "args": args, "result": result})
+
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(
+        None,
+        lambda: core.agent5.process_request(user_input=prompt, on_tool_call=on_tool)
+    )
+
+    return {
+        "response": response,
+        "tool_executions": tool_executions,
+        "project_state": core.state_manager.read_state()
+    }
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+
+ws_manager = ConnectionManager()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    loop = asyncio.get_event_loop()
+
+    # Send initial status on connect
+    if core:
+        await websocket.send_json({
+            "type": "init",
+            "model": config.default_model,
+            "workspace_dir": str(config.workspace_dir),
+            "project_state": core.state_manager.read_state()
+        })
+        await websocket.send_json({
+            "type": "history",
+            "history": core.agent5.get_history()
+        })
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "prompt":
+                prompt = data.get("content", "").strip()
+                if not prompt:
+                    continue
+
+                await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
+
+                def on_tool_call(tool_name: str, args: dict, result: str):
+                    # Dispatch tool call event to WebSocket asynchronously
+                    asyncio.run_coroutine_threadsafe(
+                        websocket.send_json({
+                            "type": "tool_execution",
+                            "tool": tool_name,
+                            "args": args,
+                            "result": result
+                        }),
+                        loop
+                    )
+
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: core.agent5.process_request(user_input=prompt, on_tool_call=on_tool_call)
+                )
+
+                await websocket.send_json({
+                    "type": "assistant_response",
+                    "content": response
+                })
+
+                # Broadcast updated project state
+                if core:
+                    await websocket.send_json({
+                        "type": "project_state",
+                        "content": core.state_manager.read_state()
+                    })
+
+            elif msg_type == "get_state":
+                if core:
+                    await websocket.send_json({
+                        "type": "project_state",
+                        "content": core.state_manager.read_state()
+                    })
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        ws_manager.disconnect(websocket)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Multi-Agent System FastAPI Server")
+    parser.add_argument("workspace_dir", nargs="?", default=None, help="Root workspace directory path")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address")
+    parser.add_argument("--port", type=int, default=8000, help="Port number")
+    args = parser.parse_args()
+
+    if args.workspace_dir:
+        core = SystemCore(workspace_path=args.workspace_dir)
+
+    uvicorn.run(app, host=args.host, port=args.port)
+
