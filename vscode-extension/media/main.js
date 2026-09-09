@@ -9,6 +9,7 @@
 
   let ws = null;
   let serverPort = 8000;
+  let thinkingEl = null;
 
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -44,13 +45,55 @@
     };
 
     ws.onclose = () => {
+      removeThinkingIndicator();
       appendSystemMessage('Disconnected from server. Reconnecting in 3s...');
       setTimeout(connectWebSocket, 3000);
     };
 
     ws.onerror = () => {
+      removeThinkingIndicator();
       appendSystemMessage('Connection error. Ensure python server.py is running on port 8000.');
     };
+  }
+
+  function showThinkingIndicator(text) {
+    removeThinkingIndicator();
+    thinkingEl = document.createElement('div');
+    thinkingEl.className = 'thinking-spinner';
+    thinkingEl.innerHTML = `<span>⏳</span> <em>${text || 'Agent 5 is thinking...'}</em>`;
+    chatHistory.appendChild(thinkingEl);
+    scrollToBottom();
+  }
+
+  function updateThinkingIndicator(text) {
+    if (thinkingEl) {
+      const em = thinkingEl.querySelector('em');
+      if (em) em.textContent = text;
+    } else {
+      showThinkingIndicator(text);
+    }
+  }
+
+  function removeThinkingIndicator() {
+    if (thinkingEl && thinkingEl.parentNode) {
+      thinkingEl.parentNode.removeChild(thinkingEl);
+    }
+    thinkingEl = null;
+  }
+
+  function setWorkingState(isWorking) {
+    if (isWorking) {
+      sendBtn.disabled = true;
+      promptInput.disabled = true;
+      promptInput.placeholder = 'Agent 5 is working on your request...';
+      showThinkingIndicator('Agent 5 is reasoning...');
+    } else {
+      sendBtn.disabled = false;
+      promptInput.disabled = false;
+      promptInput.placeholder = 'Ask Agent 5 to build or refactor...';
+      removeThinkingIndicator();
+      promptInput.focus();
+    }
   }
 
   function handleServerMessage(data) {
@@ -73,13 +116,20 @@
             appendToolExecution(item.name || 'tool', {}, item.content || '');
           }
         });
+      } else {
+        chatHistory.innerHTML = '';
+        appendSystemMessage('Connected to Multi-Agent Backend Server. (New chat session)');
       }
+      setWorkingState(false);
     } else if (data.type === 'status') {
-      appendSystemMessage(data.content);
+      updateThinkingIndicator(data.content);
     } else if (data.type === 'tool_execution') {
       appendToolExecution(data.tool, data.args, data.result);
+      updateThinkingIndicator(`Executing ${data.tool}...`);
     } else if (data.type === 'assistant_response') {
+      removeThinkingIndicator();
       appendAssistantMessage(data.content);
+      setWorkingState(false);
     } else if (data.type === 'project_state') {
       stateViewer.textContent = data.content;
     }
@@ -111,7 +161,8 @@
 
     const detail = document.createElement('div');
     detail.style.marginTop = '4px';
-    detail.textContent = `Args: ${JSON.stringify(args)}\nResult: ${result.substring(0, 150)}${result.length > 150 ? '...' : ''}`;
+    const safeResult = String(result || '');
+    detail.textContent = `Args: ${JSON.stringify(args || {})}\nResult: ${safeResult.substring(0, 150)}${safeResult.length > 150 ? '...' : ''}`;
     div.appendChild(detail);
 
     chatHistory.appendChild(div);
@@ -139,6 +190,7 @@
 
     appendUserMessage(prompt);
     promptInput.value = '';
+    setWorkingState(true);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'prompt', content: prompt }));
@@ -157,9 +209,11 @@
         if (data.response) {
           appendAssistantMessage(data.response);
         }
+        setWorkingState(false);
       })
       .catch(err => {
         appendSystemMessage(`REST API Error: ${err}`);
+        setWorkingState(false);
       });
     }
   }
@@ -178,6 +232,13 @@
       .then(res => res.json())
       .then(data => {
         agentsList.innerHTML = '';
+        const h3 = document.createElement('h3');
+        h3.style.margin = '0 0 10px 0';
+        h3.style.fontSize = '12px';
+        h3.style.opacity = '0.8';
+        h3.textContent = 'Agent Team & Roles';
+        agentsList.appendChild(h3);
+
         (data.agents || []).forEach(agent => {
           const card = document.createElement('div');
           card.className = 'agent-card';
@@ -196,6 +257,37 @@
           card.appendChild(capsDiv);
           agentsList.appendChild(card);
         });
+
+        // Fetch installed skills
+        fetch(`http://127.0.0.1:${serverPort}/api/skills`)
+          .then(res => res.json())
+          .then(skillData => {
+            const h3Skills = document.createElement('h3');
+            h3Skills.style.margin = '16px 0 10px 0';
+            h3Skills.style.fontSize = '12px';
+            h3Skills.style.opacity = '0.8';
+            h3Skills.textContent = '⚡ Installed Skills Library';
+            agentsList.appendChild(h3Skills);
+
+            (skillData.skills || []).forEach(skill => {
+              const card = document.createElement('div');
+              card.className = 'agent-card';
+              card.style.borderColor = 'var(--button-bg)';
+              const h4 = document.createElement('h4');
+              h4.textContent = `⚡ ${skill.name} (${skill.target_agent})`;
+              card.appendChild(h4);
+
+              const p = document.createElement('p');
+              p.style.margin = '4px 0 0 0';
+              p.style.fontSize = '11px';
+              p.style.opacity = '0.8';
+              p.textContent = skill.description;
+              card.appendChild(p);
+
+              agentsList.appendChild(card);
+            });
+          })
+          .catch(() => {});
       })
       .catch(() => {});
   }
@@ -211,4 +303,3 @@
   // Start connection
   connectWebSocket();
 })();
-

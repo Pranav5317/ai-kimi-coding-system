@@ -11,10 +11,17 @@ class OllamaProvider(BaseLLMProvider):
     Supports native tool/function calling and real-time streaming.
     """
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen3-coder:latest", default_temperature: float = 0.2):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "qwen3-coder:latest",
+        default_temperature: float = 0.2,
+        num_ctx: int = 8192
+    ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.default_temperature = default_temperature
+        self.num_ctx = num_ctx
         self.chat_endpoint = f"{self.base_url}/api/chat"
         self.tags_endpoint = f"{self.base_url}/api/tags"
 
@@ -70,7 +77,8 @@ class OllamaProvider(BaseLLMProvider):
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": kwargs.get("temperature", self.default_temperature)
+                "temperature": kwargs.get("temperature", self.default_temperature),
+                "num_ctx": kwargs.get("num_ctx", self.num_ctx)
             }
         }
         if tools:
@@ -102,7 +110,8 @@ class OllamaProvider(BaseLLMProvider):
             "messages": messages,
             "stream": True,
             "options": {
-                "temperature": kwargs.get("temperature", self.default_temperature)
+                "temperature": kwargs.get("temperature", self.default_temperature),
+                "num_ctx": kwargs.get("num_ctx", self.num_ctx)
             }
         }
 

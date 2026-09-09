@@ -9,6 +9,7 @@ from tools.server_manager import DevServerManager, SERVER_TOOLS
 from diary.code_diary import CodeDiary
 from state.project_state import ProjectStateManager, PROJECT_STATE_TOOLS
 from orchestration.messages import AgentMessage, MessageType
+from skills.skill_manager import SkillManager
 
 
 DEFAULT_WORKSPACE_SYSTEM_PROMPT = (
@@ -95,9 +96,42 @@ DELEGATION_TOOLS: List[Dict[str, Any]] = [
     }
 ]
 
+# Skill tools for dynamic capability loading
+SKILL_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_available_skills",
+            "description": "Lists all available specialized skill modules, descriptions, and target agents.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_skill",
+            "description": "Loads and applies specialized instructions, workflows, and code patterns for a specific skill module.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "The name of the skill module to load and apply (e.g. 'fastapi-backend', 'react-frontend', 'docker-deployment')."
+                    }
+                },
+                "required": ["skill_name"]
+            }
+        }
+    }
+]
+
 # Combined tool definitions for function-calling LLMs
 ALL_WORKSPACE_TOOLS: List[Dict[str, Any]] = (
-    FILESYSTEM_TOOLS + SERVER_TOOLS + DELEGATION_TOOLS + PROJECT_STATE_TOOLS
+    FILESYSTEM_TOOLS + SERVER_TOOLS + DELEGATION_TOOLS + PROJECT_STATE_TOOLS + SKILL_TOOLS
 )
 
 
@@ -171,6 +205,9 @@ class WorkspaceAgent(BaseAgent):
             sandbox=self.sandbox
         )
 
+        # Initialize or assign skill manager
+        self.skill_manager = kwargs.get("skill_manager") or SkillManager(workspace_root=self.sandbox.workspace_root)
+
         # Dispatch table mapping tool name to executable methods
         self.tool_dispatcher: Dict[str, Callable] = {
             # Filesystem tools
@@ -190,6 +227,9 @@ class WorkspaceAgent(BaseAgent):
             # Persistent project state tools
             "read_project_state": self.state_manager.read_state,
             "update_project_state": self.state_manager.update_state,
+            # Skill tools
+            "list_available_skills": lambda: json.dumps(self.skill_manager.list_skills(), indent=2),
+            "apply_skill": lambda skill_name: self.skill_manager.apply_skill(skill_name),
         }
 
         # Load persistent chat history for this project if it exists
@@ -302,7 +342,11 @@ class WorkspaceAgent(BaseAgent):
                     f"Delegated task: {str(task)[:60]}"
                 )
 
-            return f"--- Response from {clean_target} ({role_name}) ---\n{response.content}\n--- End of response ---"
+            resp_snippet = str(response.content)
+            if len(resp_snippet) > 1000:
+                resp_snippet = resp_snippet[:1000] + "\n... [response truncated for context memory optimization]"
+
+            return f"--- Response from {clean_target} ({role_name}) ---\n{resp_snippet}\n--- End of response ---"
 
         except Exception as e:
             err = f"Delegation Error while communicating with '{clean_target}': {str(e)}"
@@ -518,6 +562,10 @@ class WorkspaceAgent(BaseAgent):
                 return False, "Missing required 'target_agent' parameter for task delegation."
             if "task" not in args or not str(args["task"]).strip():
                 return False, "Missing required 'task' description parameter for task delegation."
+
+        elif tool_name == "apply_skill":
+            if "skill_name" not in args or not str(args["skill_name"]).strip():
+                return False, "Missing required 'skill_name' parameter for apply_skill."
 
         return True, ""
 

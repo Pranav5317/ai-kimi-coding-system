@@ -53,7 +53,8 @@ class SystemCore:
         self.llm = OllamaProvider(
             base_url=config.ollama_base_url,
             model=config.default_model,
-            default_temperature=config.temperature
+            default_temperature=config.temperature,
+            num_ctx=config.num_ctx
         )
         self.diary = CodeDiary(config.diary_file)
         self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
@@ -127,6 +128,14 @@ def list_agents():
             "capabilities": sorted(list(reg.capabilities)) if reg.capabilities else []
         })
     return {"agents": agents}
+
+
+@app.get("/api/skills")
+def list_skills():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    skills = core.agent5.skill_manager.list_skills()
+    return {"skills": skills}
 
 
 @app.get("/api/state")
@@ -223,6 +232,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "history": core.agent5.get_history()
         })
 
+    request_lock = asyncio.Lock()
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -233,36 +244,45 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not prompt:
                     continue
 
-                await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
-
-                def on_tool_call(tool_name: str, args: dict, result: str):
-                    # Dispatch tool call event to WebSocket asynchronously
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "tool_execution",
-                            "tool": tool_name,
-                            "args": args,
-                            "result": result
-                        }),
-                        loop
-                    )
-
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: core.agent5.process_request(user_input=prompt, on_tool_call=on_tool_call)
-                )
-
-                await websocket.send_json({
-                    "type": "assistant_response",
-                    "content": response
-                })
-
-                # Broadcast updated project state
-                if core:
+                if request_lock.locked():
                     await websocket.send_json({
-                        "type": "project_state",
-                        "content": core.state_manager.read_state()
+                        "type": "assistant_response",
+                        "content": "Agent 5 is currently processing another request. Please wait until it completes."
                     })
+                    continue
+
+                async with request_lock:
+                    await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
+
+                    def on_tool_call(tool_name: str, args: dict, result: str):
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({
+                                "type": "tool_execution",
+                                "tool": tool_name,
+                                "args": args,
+                                "result": result
+                            }),
+                            loop
+                        )
+
+                    try:
+                        response = await loop.run_in_executor(
+                            None,
+                            lambda: core.agent5.process_request(user_input=prompt, on_tool_call=on_tool_call)
+                        )
+                    except Exception as req_err:
+                        response = f"⚠️ System error while executing request: {str(req_err)}"
+
+                    await websocket.send_json({
+                        "type": "assistant_response",
+                        "content": response
+                    })
+
+                    if core:
+                        await websocket.send_json({
+                            "type": "project_state",
+                            "content": core.state_manager.read_state()
+                        })
 
             elif msg_type == "get_state":
                 if core:

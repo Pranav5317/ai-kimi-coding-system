@@ -195,3 +195,23 @@ body {
   border-radius: 3px;
 }
 
+.thinking-spinner {
+  background-color: var(--card-bg);
+  border: 1px dashed var(--button-bg);
+  color: var(--fg-color);
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: pulse-border 1.5s infinite ease-in-out;
+  align-self: flex-start;
+}
+
+@keyframes pulse-border {
+  0% { opacity: 0.6; }
+  50% { opacity: 1.0; }
+  100% { opacity: 0.6; }
+}
+

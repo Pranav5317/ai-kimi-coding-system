@@ -34,6 +34,17 @@ export function activate(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('multiAgent.restartServer', () => {
+            if (serverProcess) {
+                serverProcess.kill();
+                serverProcess = null;
+            }
+            startPythonServer(context);
+            vscode.window.showInformationMessage('Multi-Agent Backend Server restarted.');
+        })
+    );
 }
 
 export function deactivate() {

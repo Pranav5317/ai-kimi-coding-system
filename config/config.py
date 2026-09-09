@@ -19,6 +19,7 @@ class AppConfig:
     ollama_base_url: Optional[str] = None
     default_model: Optional[str] = None
     temperature: Optional[float] = None
+    num_ctx: Optional[int] = None
     workspace_dir: Optional[Path] = None
     diary_file: Optional[Path] = None
     agent5_system_prompt: Optional[str] = None
@@ -30,6 +31,8 @@ class AppConfig:
             self.default_model = os.getenv("LLM_MODEL") or os.getenv("MODEL_NAME", "qwen3-coder:latest")
         if self.temperature is None:
             self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
+        if self.num_ctx is None:
+            self.num_ctx = int(os.getenv("LLM_NUM_CTX") or os.getenv("NUM_CTX", "8192"))
         if self.workspace_dir is None:
             env_ws = os.getenv("WORKSPACE_DIR")
             if env_ws:
