@@ -16,12 +16,14 @@ class OllamaProvider(BaseLLMProvider):
         base_url: str = "http://localhost:11434",
         model: str = "qwen3-coder:latest",
         default_temperature: float = 0.2,
-        num_ctx: int = 8192
+        num_ctx: int = 8192,
+        timeout: int = 300
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.default_temperature = default_temperature
         self.num_ctx = num_ctx
+        self.timeout = timeout
         self.chat_endpoint = f"{self.base_url}/api/chat"
         self.tags_endpoint = f"{self.base_url}/api/tags"
 
@@ -84,8 +86,10 @@ class OllamaProvider(BaseLLMProvider):
         if tools:
             payload["tools"] = tools
 
+        req_timeout = kwargs.get("timeout", self.timeout)
+
         try:
-            response = requests.post(self.chat_endpoint, json=payload, timeout=kwargs.get("timeout", 180))
+            response = requests.post(self.chat_endpoint, json=payload, timeout=req_timeout)
             response.raise_for_status()
             data = response.json()
             msg = data.get("message", {})
@@ -94,6 +98,12 @@ class OllamaProvider(BaseLLMProvider):
                 "content": msg.get("content", ""),
                 "tool_calls": msg.get("tool_calls", None)
             }
+        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
+            raise TimeoutError(
+                f"Local Ollama model '{self.model}' timed out after {req_timeout}s. "
+                "Your local GPU/CPU might be overloaded, un-loading VRAM, or processing a very large prompt context. "
+                "Please retry your query or check your local Ollama status ('ollama ps')."
+            )
         except requests.exceptions.ConnectionError:
             raise ConnectionError(f"Failed to reach Ollama at {self.chat_endpoint}. Is Ollama running?")
         except requests.exceptions.HTTPError as e:

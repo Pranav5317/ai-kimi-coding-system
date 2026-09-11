@@ -89,6 +89,16 @@ class TestServerAPI(unittest.TestCase):
         self.assertIn("response", res)
         self.assertIn("project_state", res)
 
+    def test_07_switch_workspace(self):
+        new_dir = tempfile.mkdtemp(prefix="switch_test_")
+        try:
+            server.core.switch_workspace(new_dir)
+            self.assertEqual(str(server.core.sandbox.workspace_root), str(Path(new_dir).resolve()))
+            self.assertEqual(len(server.core.agent5.get_history()), 0)
+        finally:
+            import shutil
+            shutil.rmtree(new_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

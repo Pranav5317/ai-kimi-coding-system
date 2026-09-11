@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import difflib
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 from diary.code_diary import CodeDiary
@@ -94,6 +96,126 @@ class WorkspaceSandbox:
         self.workspace_root = workspace_root.resolve()
         self.diary = diary
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.tracked_changes: List[Dict[str, Any]] = []
+
+    def clear_tracked_changes(self) -> None:
+        """Clears accumulated file changes for a new prompt turn."""
+        self.tracked_changes.clear()
+
+    def record_change(self, target_file: Path, old_content: str, new_content: str, action: str) -> None:
+        """Computes unified diffs and records code modifications."""
+        display = self._get_display_path(target_file)
+        if display == "CHANGES_LOG.md" or display.endswith("/CHANGES_LOG.md") or target_file.name == "CHANGES_LOG.md":
+            return
+        old_lines = old_content.splitlines(keepends=True) if old_content else []
+        new_lines = new_content.splitlines(keepends=True) if new_content else []
+
+        diff_lines = list(difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{display}",
+            tofile=f"b/{display}",
+            n=3
+        ))
+
+        added_count = sum(1 for line in diff_lines if line.startswith('+') and not line.startswith('+++'))
+        removed_count = sum(1 for line in diff_lines if line.startswith('-') and not line.startswith('---'))
+        diff_text = "".join(diff_lines)
+
+        self.tracked_changes.append({
+            "path": display,
+            "abs_path": str(target_file.resolve()),
+            "action": action,
+            "added": added_count,
+            "removed": removed_count,
+            "diff": diff_text
+        })
+
+    def write_changes_log(self) -> Path:
+        """Writes/updates CHANGES_LOG.md inside the workspace root with tracked unified diffs."""
+        log_path = self.workspace_root / "CHANGES_LOG.md"
+        if not self.tracked_changes:
+            return log_path
+
+        lines = [
+            "# Project Code Changes Log",
+            f"*Recorded on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n",
+            "## Summary of Changed Files\n"
+        ]
+
+        for change in self.tracked_changes:
+            action_badge = "🟢 `[NEW]`" if change["action"] == "NEW" else "🟡 `[MODIFY]`"
+            diff_counts = []
+            if change["added"] > 0:
+                diff_counts.append(f"+{change['added']}")
+            if change["removed"] > 0:
+                diff_counts.append(f"-{change['removed']}")
+            diff_str = f" ({', '.join(diff_counts)})" if diff_counts else ""
+            file_url = Path(change["abs_path"]).as_uri()
+            lines.append(f"- {action_badge} [{change['path']}]({file_url}){diff_str}")
+
+        lines.append("\n## Detailed Unified Diffs\n")
+
+        for change in self.tracked_changes:
+            file_url = Path(change["abs_path"]).as_uri()
+            lines.append(f"### [{change['path']}]({file_url})")
+            if change["diff"]:
+                lines.append(f"```diff\n{change['diff']}\n```\n")
+            else:
+                lines.append("*(No textual diff available)*\n")
+
+        log_path.write_text("\n".join(lines), encoding="utf-8")
+        return log_path
+
+    def generate_changes_summary(self) -> str:
+        """Generates a concise markdown summary block with embedded changes card data."""
+        if not self.tracked_changes:
+            return ""
+
+        log_path = self.write_changes_log()
+        log_url = log_path.as_uri()
+
+        total_files = len(self.tracked_changes)
+        total_added = sum(c["added"] for c in self.tracked_changes)
+        total_removed = sum(c["removed"] for c in self.tracked_changes)
+
+        files_meta = [
+            {
+                "path": c["path"],
+                "abs_path": Path(c["abs_path"]).as_uri(),
+                "action": c["action"],
+                "added": c["added"],
+                "removed": c["removed"]
+            }
+            for c in self.tracked_changes
+        ]
+
+        card_json = json.dumps({
+            "total_files": total_files,
+            "total_added": total_added,
+            "total_removed": total_removed,
+            "log_url": log_url,
+            "files": files_meta
+        })
+
+        summary_lines = [
+            f"\n<!-- CHANGES_CARD: {card_json} -->\n",
+            "\n---\n### 📝 Code Changes Summary\n"
+        ]
+
+        for change in self.tracked_changes:
+            action_badge = "🟢 `[NEW]`" if change["action"] == "NEW" else "🟡 `[MODIFY]`"
+            diff_counts = []
+            if change["added"] > 0:
+                diff_counts.append(f"+{change['added']}")
+            if change["removed"] > 0:
+                diff_counts.append(f"-{change['removed']}")
+            diff_str = f" ({', '.join(diff_counts)})" if diff_counts else ""
+            file_url = Path(change["abs_path"]).as_uri()
+            summary_lines.append(f"- {action_badge} [{change['path']}]({file_url}){diff_str}")
+
+        summary_lines.append(f"\n📄 Detailed unified diffs saved to [CHANGES_LOG.md]({log_url}).")
+        return "\n".join(summary_lines)
 
     def validate_and_resolve(self, relative_or_absolute_path: str) -> Path:
         """
@@ -241,9 +363,14 @@ class WorkspaceSandbox:
         content_str = sanitize_code_content(raw_content)
         try:
             target_file = self.validate_and_resolve(target_str)
+            old_content = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
+            action = "MODIFY" if target_file.exists() else "NEW"
+
             target_file.parent.mkdir(parents=True, exist_ok=True)
             target_file.write_text(content_str, encoding="utf-8")
             display = self._get_display_path(target_file)
+            self.record_change(target_file, old_content, content_str, action)
+
             msg = f"File '{display}' created successfully ({len(content_str)} bytes written)."
             if self.diary:
                 self.diary.record("CREATE_FILE", display, "SUCCESS", f"Created file ({len(content_str)} chars)")
@@ -261,10 +388,14 @@ class WorkspaceSandbox:
         content_str = sanitize_code_content(raw_content)
         try:
             target_file = self.validate_and_resolve(target_str)
+            old_content = target_file.read_text(encoding="utf-8") if target_file.exists() else ""
+            action = "NEW" if not target_file.exists() else "MODIFY"
+
             if not target_file.exists():
                 target_file.parent.mkdir(parents=True, exist_ok=True)
                 target_file.write_text(content_str, encoding="utf-8")
                 display = self._get_display_path(target_file)
+                self.record_change(target_file, old_content, content_str, action)
                 msg = f"File '{display}' did not exist; created and wrote content ({len(content_str)} bytes)."
                 if self.diary:
                     self.diary.record("EDIT_FILE", display, "SUCCESS", "File created via edit_file")
@@ -272,6 +403,7 @@ class WorkspaceSandbox:
 
             target_file.write_text(content_str, encoding="utf-8")
             display = self._get_display_path(target_file)
+            self.record_change(target_file, old_content, content_str, action)
             msg = f"File '{display}' updated successfully ({len(content_str)} bytes written)."
             if self.diary:
                 self.diary.record("EDIT_FILE", display, "SUCCESS", f"Updated file content ({len(content_str)} chars)")

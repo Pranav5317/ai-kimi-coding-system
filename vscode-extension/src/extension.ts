@@ -81,7 +81,17 @@ function startPythonServer(context: vscode.ExtensionContext) {
         serverProcess.stderr?.on('data', (data) => {
             console.error(`[Multi-Agent Server Error] ${data}`);
         });
+
+        if (serverProcess) {
+            (serverProcess as any).on('exit', () => {
+                serverProcess = null;
+            });
+            (serverProcess as any).on('error', () => {
+                serverProcess = null;
+            });
+        }
     } catch (e) {
+        serverProcess = null;
         console.error(`Failed to auto-start python server: ${e}`);
     }
 }
@@ -105,12 +115,35 @@ class MultiAgentChatViewProvider implements vscode.WebviewViewProvider {
             localResourceRoots: [this._context.extensionUri]
         };
 
+        (webviewView.webview as any).onDidReceiveMessage(async (message: any) => {
+            if (message && message.command === 'openFile' && message.filePath) {
+                try {
+                    let fileUri: vscode.Uri;
+                    const raw = String(message.filePath);
+                    if (raw.startsWith('file:///')) {
+                        fileUri = (vscode.Uri as any).parse(raw);
+                    } else {
+                        const ws = vscode.workspace.workspaceFolders;
+                        const rootPath = ws && ws.length > 0 ? ws[0].uri.fsPath : '';
+                        fileUri = vscode.Uri.file(path.resolve(rootPath, raw));
+                    }
+                    const doc = await vscode.workspace.openTextDocument(fileUri);
+                    await vscode.window.showTextDocument(doc);
+                } catch (err) {
+                    vscode.window.showErrorMessage(`Failed to open file '${message.filePath}': ${err}`);
+                }
+            }
+        });
+
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, 'media', 'main.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, 'media', 'main.css'));
+
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        const workspacePath = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -119,28 +152,68 @@ class MultiAgentChatViewProvider implements vscode.WebviewViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet">
     <title>Multi-Agent Dev System</title>
+    <script>
+        window.workspacePath = ${JSON.stringify(workspacePath)};
+    </script>
 </head>
 <body>
+    <div class="app-header">
+        <div class="header-top">
+            <div class="brand">
+                <span class="status-dot disconnected" id="connection-dot" title="Server status: Connecting..."></span>
+                <span class="title">Multi-Agent System</span>
+            </div>
+            <div class="header-badges">
+                <label class="toggle-control" title="Ask permission before file modifications and running commands">
+                    <input type="checkbox" id="require-perm-toggle" checked />
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">Ask Permission</span>
+                </label>
+                <span class="badge model-badge" id="model-badge">qwen3-coder</span>
+            </div>
+        </div>
+        <div class="header-workspace" id="workspace-badge" title="Active workspace path">
+            <span class="folder-icon">📁</span> <span id="workspace-path-text">${workspacePath ? workspacePath : 'No Workspace'}</span>
+        </div>
+    </div>
+
     <div class="tabs">
-        <button class="tab-btn active" data-tab="chat-tab">Chat & Manager</button>
-        <button class="tab-btn" data-tab="state-tab">Project State</button>
-        <button class="tab-btn" data-tab="agents-tab">Team Status</button>
+        <button class="tab-btn active" data-tab="chat-tab">
+            <span class="tab-icon">💬</span> Chat & Manager
+        </button>
+        <button class="tab-btn" data-tab="state-tab">
+            <span class="tab-icon">📋</span> Project State
+        </button>
+        <button class="tab-btn" data-tab="agents-tab">
+            <span class="tab-icon">👥</span> Team & Skills
+        </button>
     </div>
 
     <div id="chat-tab" class="tab-content active">
         <div id="chat-history" class="chat-history"></div>
-        <div class="input-area">
-            <textarea id="prompt-input" rows="2" placeholder="Ask Agent 5 to build or refactor..."></textarea>
-            <button id="send-btn">Send</button>
+        <div class="input-container">
+            <div class="input-area">
+                <textarea id="prompt-input" rows="2" placeholder="Ask Agent 5 to build, refactor, or test..."></textarea>
+                <div class="button-group">
+                    <button id="send-btn" class="primary-btn">
+                        <span>Send</span> <span class="send-icon">🚀</span>
+                    </button>
+                    <button id="clear-btn" class="icon-btn" title="Clear chat history for current project">🗑️ Clear</button>
+                </div>
+            </div>
         </div>
     </div>
 
     <div id="state-tab" class="tab-content">
+        <div class="tab-header-actions">
+            <button id="refresh-state-btn" class="secondary-btn">🔄 Refresh State</button>
+            <button id="open-state-btn" class="secondary-btn">📄 Open File</button>
+        </div>
         <div id="state-viewer" class="state-viewer">Loading PROJECT_STATE.md...</div>
     </div>
 
     <div id="agents-tab" class="tab-content">
-        <div id="agents-list">Loading agents...</div>
+        <div id="agents-list">Loading agent team & skills...</div>
     </div>
 
     <script src="${scriptUri}"></script>

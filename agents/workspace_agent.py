@@ -43,7 +43,11 @@ DEFAULT_WORKSPACE_SYSTEM_PROMPT = (
     "   - Give an accurate answer explaining what exists and offer to implement any missing features.\n"
     "5. ZERO TECH STACK PROMPTING FOR EXISTING CODEBASES:\n"
     "   - EXISTING CODEBASE: If the workspace contains pre-existing code or manifests (e.g. package.json, requirements.txt, .py, .js, .cpp, .java), NEVER ask the user to explain or specify the tech stack! Automatically detect and adopt the existing tech stack from code files.\n"
-    "   - BRAND NEW PROJECT: ONLY if the workspace is completely empty or brand new with no code files/manifests, then and ONLY then should you ask the user for their preferred tech stack or propose one.\n\n"
+    "   - BRAND NEW PROJECT: ONLY if the workspace is completely empty or brand new with no code files/manifests, then and ONLY then should you ask the user for their preferred tech stack or propose one.\n"
+    "6. MANDATORY RESPONSE STRUCTURE & FORMATTING RULE:\n"
+    "   - Always format responses using clean, structured GitHub-Flavored Markdown.\n"
+    "   - Use distinct section headers ('### Section Title'), bullet points for lists, and proper fenced code blocks ('```python ... ```') for code snippets.\n"
+    "   - Avoid walls of text. Group code reviews into Key Findings, Security & Performance Issues, and Clean Code.\n\n"
     "PERSISTENT PROJECT MEMORY & STATE RULES:\n"
     "- PROJECT_STATE.md represents what is true about the project RIGHT NOW. It survives LLM conversational context compaction.\n"
     "- Always keep PROJECT_STATE.md accurate and concise using 'read_project_state' and 'update_project_state'.\n"
@@ -254,8 +258,10 @@ class WorkspaceAgent(BaseAgent):
                 data = json.loads(raw)
                 if isinstance(data, list):
                     self.history = data
+                    return
         except Exception:
             pass
+        self.history = []
 
     def save_history_to_disk(self) -> None:
         """Saves current chat history to .agent_chat_history.json inside project root."""
@@ -476,10 +482,20 @@ class WorkspaceAgent(BaseAgent):
                 message_type=MessageType.RESPONSE
             )
 
+    def _clean_tool_call_xml_from_text(self, text: str) -> str:
+        """Strips raw XML tool call tags from assistant response text."""
+        if not text:
+            return ""
+        # Remove <function=...> ... </function> blocks
+        cleaned = re.sub(r'<function=[a-zA-Z0-9_\-]+>.*?</function>', '', text, flags=re.DOTALL)
+        # Remove leftover standalone tags like <tool_call>, </tool_call>, </function>, etc.
+        cleaned = re.sub(r'</?(?:tool_call|function(?:=[a-zA-Z0-9_\-]+)?|parameter(?:=[a-zA-Z0-9_\-]+)?)\s*/?>', '', cleaned)
+        return cleaned.strip()
+
     def _extract_tool_calls_from_text(self, text: str) -> List[Dict[str, Any]]:
         """
-        Fallback parser that extracts tool calls from text if Ollama placed raw JSON in content
-        due to JSON quoting quirks in local LLMs.
+        Fallback parser that extracts tool calls from text if local LLMs (e.g. Qwen, Llama) placed
+        raw JSON or pseudo-XML tag formatted tool calls in content.
         """
         if not text or not text.strip():
             return []
@@ -502,8 +518,57 @@ class WorkspaceAgent(BaseAgent):
         except Exception:
             pass
 
-        # 2. Regex-based extraction for multiple JSON tool call structures
         calls = []
+
+        # 2. Extract pseudo-XML tool call tags: <function=tool_name> <parameter=key>value</parameter> </function>
+        func_matches = list(re.finditer(r'<function=([a-zA-Z0-9_\-]+)>(.*?)(?:</function>|$)', cleaned, re.DOTALL))
+        for f_match in func_matches:
+            tool_name = f_match.group(1).strip()
+            body = f_match.group(2)
+            args: Dict[str, Any] = {}
+            param_matches = re.finditer(r'<parameter=([a-zA-Z0-9_\-]+)>\s*(.*?)\s*</parameter>', body, re.DOTALL)
+            for p_match in param_matches:
+                p_name = p_match.group(1).strip()
+                p_val = p_match.group(2)
+                # Parse p_val if it looks like JSON
+                if (p_val.startswith("{") and p_val.endswith("}")) or (p_val.startswith("[") and p_val.endswith("]")):
+                    try:
+                        p_val = json.loads(p_val)
+                    except Exception:
+                        pass
+                args[p_name] = p_val
+
+            # Parameter alias normalization for local LLMs
+            if tool_name in ("list_files", "read_file", "create_file", "edit_file", "create_directory", "inspect_project_structure"):
+                if "path" not in args:
+                    for alias in ("directory", "folder", "file", "filepath", "filename", "target_path"):
+                        if alias in args:
+                            args["path"] = args[alias]
+                            break
+
+            if tool_name in ("create_file", "edit_file"):
+                if "content" not in args:
+                    for alias in ("text", "code", "file_content", "body"):
+                        if alias in args:
+                            args["content"] = args[alias]
+                            break
+
+            if tool_name == "delegate_task":
+                if "target_agent" not in args and "agent" in args:
+                    args["target_agent"] = args["agent"]
+                if "task" not in args and "description" in args:
+                    args["task"] = args["description"]
+
+            if tool_name == "apply_skill":
+                if "skill_name" not in args and "skill" in args:
+                    args["skill_name"] = args["skill"]
+
+            calls.append({"function": {"name": tool_name, "arguments": args}})
+
+        if calls:
+            return calls
+
+        # 3. Regex-based extraction for multiple JSON tool call structures embedded in prose
         pattern = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"(?:parameters|arguments)"\s*:\s*(\{.*?\})\s*\}'
         for match in re.finditer(pattern, cleaned, re.DOTALL):
             tool_name = match.group(1)
@@ -624,7 +689,8 @@ class WorkspaceAgent(BaseAgent):
     def process_request(
         self,
         user_input: str,
-        on_tool_call: Optional[Callable[[str, Dict[str, Any], str], None]] = None
+        on_tool_call: Optional[Callable[[str, Dict[str, Any], str], None]] = None,
+        pre_tool_call: Optional[Callable[[str, Dict[str, Any]], bool]] = None
     ) -> str:
         """
         Main reasoning and execution loop for Agent 5:
@@ -635,6 +701,7 @@ class WorkspaceAgent(BaseAgent):
         5. Feeds results back to LLM until final response is produced.
         """
         self.add_message("user", user_input)
+        self.sandbox.clear_tracked_changes()
 
         iteration = 0
         while iteration < self.max_tool_iterations:
@@ -646,11 +713,15 @@ class WorkspaceAgent(BaseAgent):
             tool_calls = response.get("tool_calls") if isinstance(response, dict) else None
             raw_content = response.get("content", "") if isinstance(response, dict) else str(response)
 
-            # Fallback: check if tool call JSON was returned in content
+            # Fallback: check if tool call JSON or XML was returned in content
             if not tool_calls and raw_content:
                 extracted = self._extract_tool_calls_from_text(raw_content)
                 if extracted:
                     tool_calls = extracted
+                    raw_content = self._clean_tool_call_xml_from_text(raw_content)
+
+            if tool_calls and raw_content and ("<function=" in raw_content or "<tool_call>" in raw_content):
+                raw_content = self._clean_tool_call_xml_from_text(raw_content)
 
             # Check if LLM requested tool execution
             if tool_calls:
@@ -673,12 +744,21 @@ class WorkspaceAgent(BaseAgent):
                         except Exception:
                             fn_args = {}
 
-                    # Execute tool inside sandbox / server manager / orchestrator / state manager
-                    tool_result = self._execute_tool(fn_name, fn_args)
+                    parsed_args = fn_args if isinstance(fn_args, dict) else {}
+
+                    # Optional pre-execution permission gate
+                    if pre_tool_call:
+                        allowed = pre_tool_call(fn_name, parsed_args)
+                        if not allowed:
+                            tool_result = f"⚠️ Action Cancelled: User denied permission to execute '{fn_name}'."
+                        else:
+                            tool_result = self._execute_tool(fn_name, fn_args)
+                    else:
+                        tool_result = self._execute_tool(fn_name, fn_args)
 
                     # Notify caller (CLI / test suite)
                     if on_tool_call:
-                        on_tool_call(fn_name, fn_args if isinstance(fn_args, dict) else {}, tool_result)
+                        on_tool_call(fn_name, parsed_args, tool_result)
 
                     # Record tool output in history for the LLM to inspect
                     tool_msg: Dict[str, Any] = {
@@ -698,6 +778,9 @@ class WorkspaceAgent(BaseAgent):
             else:
                 # Final text answer reached
                 final_content = raw_content.strip()
+                changes_summary = self.sandbox.generate_changes_summary()
+                if changes_summary:
+                    final_content = f"{final_content}\n{changes_summary}"
                 self.add_message("assistant", final_content)
                 return final_content
 
@@ -715,5 +798,8 @@ class WorkspaceAgent(BaseAgent):
             "Current project state and workspace progress have been preserved in PROJECT_STATE.md and CODE_DIARY.md. "
             f"You can review the progress or provide follow-up instructions to continue.{state_summary}"
         )
+        changes_summary = self.sandbox.generate_changes_summary()
+        if changes_summary:
+            warning_msg = f"{warning_msg}\n{changes_summary}"
         self.add_message("assistant", warning_msg)
         return warning_msg

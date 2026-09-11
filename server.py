@@ -2,8 +2,10 @@ import os
 import sys
 import json
 import asyncio
+import threading
+import uuid
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +56,8 @@ class SystemCore:
             base_url=config.ollama_base_url,
             model=config.default_model,
             default_temperature=config.temperature,
-            num_ctx=config.num_ctx
+            num_ctx=config.num_ctx,
+            timeout=config.llm_timeout
         )
         self.diary = CodeDiary(config.diary_file)
         self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
@@ -90,6 +93,35 @@ class SystemCore:
                 handler=agent.handle_agent_message
             )
         self.orchestrator.register_observer(self.agent4.observe_message)
+
+    def switch_workspace(self, workspace_path: str) -> None:
+        """
+        Dynamically switches the core workspace to target project folder.
+        Reloads sandbox, dev server manager, project state manager, diary, and chat history.
+        """
+        if not workspace_path or not str(workspace_path).strip():
+            return
+
+        target_path = Path(workspace_path).resolve()
+        if self.sandbox and self.sandbox.workspace_root == target_path:
+            return
+
+        config.set_workspace(target_path)
+        self.diary = CodeDiary(config.diary_file)
+        self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
+        self.server_manager = DevServerManager(workspace_root=config.workspace_dir, diary=self.diary)
+        self.state_manager = ProjectStateManager(sandbox=self.sandbox)
+        self.state_manager.onboard_existing_project()
+
+        # Update Agent 2 & Agent 5 references
+        self.agent2.sandbox = self.sandbox
+        self.agent2.diary = self.diary
+
+        self.agent5.sandbox = self.sandbox
+        self.agent5.diary = self.diary
+        self.agent5.server_manager = self.server_manager
+        self.agent5.state_manager = self.state_manager
+        self.agent5.load_history_from_disk()
 
 
 # Global core instance
@@ -165,10 +197,30 @@ def get_diary_entries(limit: int = 20):
     return {"entries": recent}
 
 
+@app.post("/api/workspace")
+def switch_workspace_endpoint(payload: Dict[str, Any]):
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    target_path = payload.get("workspace_path")
+    if target_path:
+        core.switch_workspace(target_path)
+    return {
+        "status": "success",
+        "workspace_dir": str(config.workspace_dir),
+        "history": core.agent5.get_history(),
+        "project_state": core.state_manager.read_state()
+    }
+
+
 @app.post("/api/chat")
 async def chat_endpoint(payload: Dict[str, Any]):
     if core is None:
         raise HTTPException(status_code=500, detail="Core not initialized.")
+    
+    workspace_path = payload.get("workspace_path")
+    if workspace_path:
+        core.switch_workspace(workspace_path)
+
     prompt = payload.get("prompt", "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
@@ -215,9 +267,13 @@ ws_manager = ConnectionManager()
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Query(None)):
     await ws_manager.connect(websocket)
     loop = asyncio.get_event_loop()
+    pending_permission_events: Dict[str, Tuple[threading.Event, List[bool]]] = {}
+
+    if workspace and core:
+        core.switch_workspace(workspace)
 
     # Send initial status on connect
     if core:
@@ -239,8 +295,40 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_json()
             msg_type = data.get("type")
 
-            if msg_type == "prompt":
+            if msg_type == "switch_workspace":
+                target_ws = data.get("workspace_path")
+                if target_ws and core:
+                    core.switch_workspace(target_ws)
+                    await websocket.send_json({
+                        "type": "init",
+                        "model": config.default_model,
+                        "workspace_dir": str(config.workspace_dir),
+                        "project_state": core.state_manager.read_state()
+                    })
+                    await websocket.send_json({
+                        "type": "history",
+                        "history": core.agent5.get_history()
+                    })
+
+            elif msg_type == "clear_history":
+                if core:
+                    core.agent5.clear_history()
+                    await websocket.send_json({
+                        "type": "history",
+                        "history": []
+                    })
+
+            elif msg_type == "permission_response":
+                req_id = data.get("request_id")
+                approved = bool(data.get("approved", False))
+                if req_id and req_id in pending_permission_events:
+                    evt, holder = pending_permission_events.pop(req_id)
+                    holder[0] = approved
+                    evt.set()
+
+            elif msg_type == "prompt":
                 prompt = data.get("content", "").strip()
+                require_perm = bool(data.get("require_permission", True))
                 if not prompt:
                     continue
 
@@ -253,6 +341,55 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 async with request_lock:
                     await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
+
+                    mutating_tools = {"create_file", "edit_file", "write_file", "delete_file", "run_command", "start_dev_server", "stop_dev_server"}
+
+                    def pre_tool_call(tool_name: str, args: dict) -> bool:
+                        target = args.get("path") or args.get("file_path") or args.get("file") or args.get("target") or args.get("command") or ""
+
+                        # Live active file / tool status indicator
+                        if tool_name in {"create_file", "edit_file", "write_file"} and target:
+                            status_txt = f"✍️ Editing {target}..."
+                        elif tool_name == "read_file" and target:
+                            status_txt = f"📖 Reading {target}..."
+                        elif tool_name == "run_command":
+                            status_txt = f"⚡ Running command: {str(target)[:30]}..."
+                        else:
+                            status_txt = f"⚙️ Executing {tool_name}..."
+
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({"type": "status", "content": status_txt}),
+                            loop
+                        )
+
+                        if require_perm and tool_name in mutating_tools:
+                            req_id = f"req_{uuid.uuid4().hex[:8]}"
+                            evt = threading.Event()
+                            holder = [False]
+                            pending_permission_events[req_id] = (evt, holder)
+
+                            # Notify status spinner of approval prompt
+                            asyncio.run_coroutine_threadsafe(
+                                websocket.send_json({"type": "status", "content": f"⚠️ Waiting for approval: {tool_name} {target}"}),
+                                loop
+                            )
+
+                            asyncio.run_coroutine_threadsafe(
+                                websocket.send_json({
+                                    "type": "permission_request",
+                                    "request_id": req_id,
+                                    "tool": tool_name,
+                                    "args": args,
+                                    "target_file": str(target)
+                                }),
+                                loop
+                            )
+
+                            # Block worker thread until client approves/denies or timeout occurs
+                            evt.wait(timeout=120)
+                            return holder[0]
+
+                        return True
 
                     def on_tool_call(tool_name: str, args: dict, result: str):
                         asyncio.run_coroutine_threadsafe(
@@ -268,7 +405,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     try:
                         response = await loop.run_in_executor(
                             None,
-                            lambda: core.agent5.process_request(user_input=prompt, on_tool_call=on_tool_call)
+                            lambda: core.agent5.process_request(
+                                user_input=prompt,
+                                on_tool_call=on_tool_call,
+                                pre_tool_call=pre_tool_call
+                            )
                         )
                     except Exception as req_err:
                         response = f"⚠️ System error while executing request: {str(req_err)}"
