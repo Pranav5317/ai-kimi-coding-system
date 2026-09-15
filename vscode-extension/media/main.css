@@ -1,15 +1,18 @@
 :root {
   --bg-color: var(--vscode-sideBar-background, #18181b);
   --fg-color: var(--vscode-sideBar-foreground, #f4f4f5);
+  --editor-bg: var(--vscode-editor-background, #1e1e24);
+  --editor-fg: var(--vscode-editor-foreground, #f4f4f5);
   --input-bg: var(--vscode-input-background, #1f1f23);
   --input-fg: var(--vscode-input-foreground, #f4f4f5);
-  --input-border: var(--vscode-input-border, #3f3f46);
+  --input-border: var(--vscode-input-border, rgba(255, 255, 255, 0.15));
   --button-bg: var(--vscode-button-background, #0284c7);
   --button-fg: var(--vscode-button-foreground, #ffffff);
-  --badge-bg: var(--vscode-badge-background, #27272a);
+  --badge-bg: var(--vscode-badge-background, rgba(56, 189, 248, 0.15));
   --badge-fg: var(--vscode-badge-foreground, #38bdf8);
-  --card-bg: var(--vscode-editor-background, #18181b);
-  --card-border: var(--vscode-widget-border, #27272a);
+  --card-bg: var(--vscode-editor-background, #1e1e24);
+  --card-border: var(--vscode-widget-border, rgba(255, 255, 255, 0.15));
+  --code-bg: var(--vscode-textCodeBlock-background, rgba(0, 0, 0, 0.3));
   --accent-color: #38bdf8;
   --success-color: #22c55e;
   --warning-color: #eab308;
@@ -51,7 +54,7 @@ body {
 
 /* Header Bar */
 .app-header {
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.4) 100%);
+  background: var(--sidebar-bg, #18181b);
   border-bottom: 1px solid var(--card-border);
   padding: 8px 12px;
   display: flex;
@@ -130,11 +133,12 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #94a3b8;
-  background: rgba(0, 0, 0, 0.2);
+  color: var(--fg-color);
+  opacity: 0.8;
+  background: rgba(0, 0, 0, 0.15);
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -157,7 +161,8 @@ body {
   padding: 8px 6px;
   background: none;
   border: none;
-  color: #94a3b8;
+  color: var(--fg-color);
+  opacity: 0.7;
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
@@ -171,14 +176,16 @@ body {
 }
 
 .tab-btn:hover {
+  opacity: 1;
   color: var(--fg-color);
-  background-color: rgba(255, 255, 255, 0.03);
+  background-color: rgba(255, 255, 255, 0.04);
 }
 
 .tab-btn.active {
+  opacity: 1;
   color: var(--accent-color);
   border-bottom-color: var(--accent-color);
-  background-color: rgba(56, 189, 248, 0.05);
+  background-color: rgba(56, 189, 248, 0.08);
 }
 
 .tab-icon {
@@ -240,18 +247,27 @@ body {
 
 .msg.assistant {
   background-color: var(--card-bg);
+  color: var(--editor-fg);
   border: 1px solid var(--card-border);
   border-left: 3px solid var(--accent-color);
   align-self: flex-start;
   width: 100%;
   border-bottom-left-radius: 2px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.msg.assistant p,
+.msg.assistant li,
+.msg.assistant span,
+.msg.assistant div {
+  color: var(--editor-fg);
 }
 
 .msg.system {
   background: rgba(30, 41, 59, 0.4);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  color: #94a3b8;
+  border: 1px solid var(--card-border);
+  color: var(--fg-color);
+  opacity: 0.85;
   font-size: 11px;
   text-align: center;
   align-self: center;
@@ -262,9 +278,9 @@ body {
 /* Markdown Formatting */
 .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 {
   margin: 14px 0 8px 0;
-  color: #38bdf8;
+  color: var(--accent-color);
   font-weight: 700;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--card-border);
   padding-bottom: 4px;
 }
 
@@ -291,26 +307,27 @@ body {
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--card-border);
-  background-color: #09090b;
+  background-color: var(--code-bg);
 }
 
 .code-header {
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.05);
   padding: 5px 10px;
   font-size: 10px;
   font-family: monospace;
   text-transform: uppercase;
-  color: #a1a1aa;
+  color: var(--editor-fg);
+  opacity: 0.8;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--card-border);
 }
 
 .copy-btn {
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #f4f4f5;
+  border: 1px solid var(--card-border);
+  color: var(--editor-fg);
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 3px;
@@ -320,6 +337,7 @@ body {
 
 .copy-btn:hover {
   background: var(--button-bg);
+  color: #ffffff;
 }
 
 .code-block-wrapper pre {
@@ -329,12 +347,12 @@ body {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   line-height: 1.5;
-  color: #e4e4e7;
+  color: var(--editor-fg);
 }
 
 .inline-code {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.12);
+  color: var(--accent-color);
   padding: 2px 5px;
   border-radius: 4px;
   font-family: var(--vscode-editor-font-family, monospace);
@@ -342,7 +360,7 @@ body {
 }
 
 .file-link {
-  color: #38bdf8;
+  color: var(--accent-color);
   text-decoration: none;
   font-weight: 600;
   cursor: pointer;
@@ -364,8 +382,8 @@ body {
 /* Tool Action Cards */
 .tool-card {
   margin: 6px 0;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
   border-radius: 6px;
   overflow: hidden;
   transition: border-color 0.2s ease;
@@ -382,7 +400,7 @@ body {
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .tool-info {
@@ -425,7 +443,8 @@ body {
 
 .tool-toggle-arrow {
   font-size: 10px;
-  color: #94a3b8;
+  color: var(--fg-color);
+  opacity: 0.6;
   transition: transform 0.2s ease;
 }
 
@@ -436,15 +455,15 @@ body {
 .tool-card-body {
   display: none;
   padding: 8px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: #09090b;
+  border-top: 1px solid var(--card-border);
+  background: var(--code-bg);
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 200px;
   overflow-y: auto;
-  color: #d4d4d8;
+  color: var(--editor-fg);
 }
 
 .tool-card.expanded .tool-card-body {
@@ -453,8 +472,8 @@ body {
 
 /* Thinking & Reasoning Pulse Loader */
 .thinking-spinner {
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: var(--card-bg);
+  border: 1px solid var(--accent-color);
   color: var(--fg-color);
   font-size: 12px;
   padding: 8px 12px;
@@ -463,7 +482,7 @@ body {
   align-items: center;
   gap: 10px;
   align-self: flex-start;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .spinner-ring {
@@ -485,7 +504,7 @@ body {
   background-color: var(--input-bg);
   padding: 8px;
   border-radius: 8px;
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
 }
 
 .input-area {
@@ -546,7 +565,8 @@ body {
 
 .icon-btn {
   background: transparent;
-  color: #94a3b8;
+  color: var(--fg-color);
+  opacity: 0.8;
   border: 1px solid var(--card-border);
   border-radius: 6px;
   padding: 6px 10px;
@@ -556,9 +576,10 @@ body {
 }
 
 .icon-btn:hover {
+  opacity: 1;
   color: var(--fg-color);
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent-color);
 }
 
 .secondary-btn {
@@ -589,6 +610,7 @@ body {
   font-size: 12px;
   line-height: 1.6;
   background-color: var(--card-bg);
+  color: var(--editor-fg);
   padding: 12px;
   border-radius: 6px;
   border: 1px solid var(--card-border);
@@ -597,13 +619,14 @@ body {
 
 .state-viewer h1, .state-viewer h2, .state-viewer h3 {
   color: var(--accent-color);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--card-border);
   padding-bottom: 4px;
   margin-top: 14px;
 }
 
 .agent-card {
   background-color: var(--card-bg);
+  color: var(--editor-fg);
   border: 1px solid var(--card-border);
   border-radius: 6px;
   padding: 12px;
@@ -639,13 +662,14 @@ body {
   font-size: 10px;
   background-color: rgba(56, 189, 248, 0.1);
   color: var(--accent-color);
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  border: 1px solid rgba(56, 189, 248, 0.25);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .skill-card {
-  background: rgba(30, 41, 59, 0.4);
+  background: var(--card-bg);
+  color: var(--editor-fg);
   border: 1px solid var(--card-border);
   border-radius: 6px;
   padding: 10px;
@@ -663,13 +687,14 @@ body {
 
 .skill-title {
   font-weight: 700;
-  color: #38bdf8;
+  color: var(--accent-color);
   font-size: 12px;
 }
 
 .skill-desc {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--editor-fg);
+  opacity: 0.8;
 }
 
 .apply-skill-btn {
@@ -697,7 +722,8 @@ body {
   gap: 6px;
   cursor: pointer;
   font-size: 10px;
-  color: #94a3b8;
+  color: var(--fg-color);
+  opacity: 0.8;
   user-select: none;
 }
 
@@ -738,10 +764,10 @@ body {
 .permission-card {
   margin: 10px 0;
   border: 1px solid rgba(234, 179, 8, 0.5);
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.9) 100%);
+  background: var(--card-bg);
   border-radius: 8px;
   padding: 12px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
   animation: fadeIn 0.25s ease-in-out;
 }
 
@@ -763,14 +789,14 @@ body {
 
 .permission-body {
   font-size: 11px;
-  color: var(--fg-color);
+  color: var(--editor-fg);
   margin-bottom: 10px;
   line-height: 1.4;
 }
 
 .permission-target {
-  background: #09090b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--code-bg);
+  border: 1px solid var(--card-border);
   padding: 6px 8px;
   border-radius: 4px;
   font-family: var(--vscode-editor-font-family, monospace);
@@ -821,17 +847,18 @@ body {
 
 /* Code Changes UI Card Widget (matches Cursor / Git diff card design) */
 .changes-card-widget {
-  background: rgba(24, 24, 27, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--card-bg);
+  color: var(--editor-fg);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   margin: 12px 0;
   overflow: hidden;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .changes-card-widget:hover {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--accent-color);
 }
 
 .changes-card-header {
@@ -854,7 +881,7 @@ body {
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--fg-color, #e4e4e7);
+  color: var(--editor-fg);
 }
 
 .changes-file-count {
@@ -877,7 +904,8 @@ body {
 
 .changes-chevron {
   font-size: 13px;
-  color: #8b949e;
+  color: var(--editor-fg);
+  opacity: 0.6;
   transition: transform 0.2s ease;
   margin-left: 2px;
 }
@@ -890,9 +918,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--fg-color, #f4f4f5);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--editor-fg);
+  border: 1px solid var(--card-border);
   border-radius: 7px;
   padding: 5px 13px;
   font-size: 12px;
@@ -902,8 +930,8 @@ body {
 }
 
 .review-changes-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: var(--accent-color, #38bdf8);
+  background: var(--button-bg);
+  border-color: var(--accent-color);
   color: #ffffff;
   transform: translateY(-1px);
 }
@@ -911,8 +939,8 @@ body {
 .changes-card-details {
   display: none;
   padding: 10px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid var(--card-border);
+  background: var(--code-bg);
 }
 
 .changes-card-widget.expanded .changes-card-details {
@@ -925,7 +953,7 @@ body {
   justify-content: space-between;
   padding: 6px 0;
   font-size: 12px;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+  border-bottom: 1px dashed var(--card-border);
 }
 
 .changes-file-item:last-child {
@@ -952,3 +980,95 @@ body {
   border: 1px solid rgba(234, 179, 8, 0.3);
 }
 
+/* Implementation Plan UI Card Widget */
+.plan-card-widget {
+  margin: 12px 0;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: var(--card-bg);
+  color: var(--editor-fg);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  animation: fadeIn 0.25s ease-in-out;
+}
+
+.plan-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.plan-card-title {
+  font-weight: 700;
+  color: var(--accent-color);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-card-body {
+  font-size: 12px;
+  color: var(--editor-fg);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.plan-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.review-plan-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--editor-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.review-plan-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--accent-color);
+}
+
+.reject-plan-btn {
+  background: transparent;
+  color: var(--danger-color);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reject-plan-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.approve-plan-btn {
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3);
+}
+
+.approve-plan-btn:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}

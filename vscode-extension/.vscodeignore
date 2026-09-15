@@ -1,0 +1,8 @@
+.githistory
+.vscode/**
+.vscode-test/**
+src/**
+tsconfig.json
+**/*.map
+*.vsix
+

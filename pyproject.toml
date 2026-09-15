@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-agent-dev-system"
+version = "1.0.0"
+description = "Autonomous 5-Agent Software Development System API backend powering VS Code Extension."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+  {name = "Pranav Apsingekar", email = "pranavapsingekar@gmail.com"}
+]
+dependencies = [
+  "fastapi>=0.100.0",
+  "uvicorn>=0.20.0",
+  "requests>=2.28.0",
+  "pydantic>=2.0.0",
+  "python-dotenv>=1.0.0"
+]
+
+[project.scripts]
+multi-agent-server = "server:main"
+
+[project.urls]
+Homepage = "https://github.com/Pranav5317/ai-kimi-coding-system"
+Repository = "https://github.com/Pranav5317/ai-kimi-coding-system.git"
+

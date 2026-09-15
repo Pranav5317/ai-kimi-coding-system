@@ -122,3 +122,43 @@ class SkillManager:
             f"{skill.instructions}\n"
             f"=== END OF SKILL: {skill.name.upper()} ==="
         )
+
+    def auto_match_skills(self, user_prompt: str) -> List[Skill]:
+        """
+        Analyzes user prompt and automatically identifies matching Skill modules
+        based on explicit skill names and specialized domain phrases.
+        """
+        if not user_prompt or not user_prompt.strip():
+            return []
+
+        self.discover_skills()
+        prompt_lower = user_prompt.lower()
+        matched: List[Skill] = []
+
+        # Domain triggers mapping for built-in skills
+        skill_triggers: Dict[str, List[str]] = {
+            "fastapi-backend": ["fastapi", "fastapi-backend", "fastapi backend"],
+            "react-frontend": ["react", "react-frontend", "react frontend", "jsx component", "tsx component"],
+            "database-migration": ["database migration", "alembic", "db migration", "migration script"],
+            "unit-testing": ["unit test", "unit testing", "pytest", "unit-testing", "jest test"],
+            "nextjs-frontend": ["nextjs", "next.js", "next-js", "app router", "server components", "nextjs-frontend"],
+            "vue-frontend": ["vue", "vuejs", "vue.js", "pinia", "vue-frontend"],
+            "svelte-frontend": ["svelte", "sveltekit", "svelte 5", "svelte-frontend"],
+            "express-nodejs": ["express", "expressjs", "express.js", "node.js backend", "express-nodejs"],
+            "django-backend": ["django", "django rest", "drf", "django-backend"],
+            "nestjs-backend": ["nestjs", "nest.js", "nest js", "nestjs-backend"],
+            "prisma-orm": ["prisma", "schema.prisma", "prisma migrate", "prisma-orm"],
+            "mongodb-mongoose": ["mongodb", "mongoose", "mongodb-mongoose"]
+        }
+
+        for skill in self.skills.values():
+            s_name = skill.name.lower()
+            
+            # Check explicit name or custom triggers
+            triggers = skill_triggers.get(s_name, [s_name, s_name.replace("-", " ")])
+            
+            if any(t in prompt_lower for t in triggers):
+                if skill not in matched:
+                    matched.append(skill)
+
+        return matched

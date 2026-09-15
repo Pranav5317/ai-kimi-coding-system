@@ -11,17 +11,25 @@ declare module 'vscode' {
         function file(path: string): Uri;
         function joinPath(base: Uri, ...paths: string[]): Uri;
     }
+    export interface OutputChannel {
+        appendLine(value: string): void;
+    }
+    export interface WorkspaceConfiguration {
+        get<T>(section: string, defaultValue?: T): T;
+    }
     export namespace window {
         function registerWebviewViewProvider(providerId: string, provider: any): any;
         function showInformationMessage(message: string): void;
         function showErrorMessage(message: string): void;
         function showTextDocument(document: any): Promise<any>;
+        function createOutputChannel(name: string): OutputChannel;
     }
     export namespace commands {
         function registerCommand(command: string, callback: (...args: any[]) => any): any;
     }
     export namespace workspace {
         function openTextDocument(uri: Uri): Promise<any>;
+        function getConfiguration(section?: string): WorkspaceConfiguration;
         var workspaceFolders: { uri: Uri }[] | undefined;
     }
     export interface WebviewView {
@@ -51,6 +59,12 @@ declare module 'child_process' {
 declare module 'path' {
     export function join(...paths: string[]): string;
     export function resolve(...paths: string[]): string;
+    export function isAbsolute(p: string): boolean;
+    export function dirname(p: string): string;
+}
+
+declare module 'fs' {
+    export function existsSync(path: string): boolean;
 }
 
 declare var process: {
@@ -60,4 +74,3 @@ declare var console: {
     log(...args: any[]): void;
     error(...args: any[]): void;
 };
-

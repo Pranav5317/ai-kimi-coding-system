@@ -38,9 +38,20 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const child_process = __importStar(require("child_process"));
 const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
 let serverProcess = null;
+let outputChannel = null;
+function getOutputChannel() {
+    if (!outputChannel) {
+        outputChannel = vscode.window.createOutputChannel('Multi-Agent Server');
+    }
+    return outputChannel;
+}
 function activate(context) {
-    startPythonServer(context);
+    const config = vscode.workspace.getConfiguration('multiAgent');
+    if (config.get('autoStartServer', true)) {
+        startPythonServer(context);
+    }
     const provider = new MultiAgentChatViewProvider(context);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(MultiAgentChatViewProvider.viewType, provider));
     // Register commands
@@ -75,40 +86,112 @@ function deactivate() {
         serverProcess = null;
     }
 }
+function resolveServerScript(context, workspacePath, customPath) {
+    if (customPath) {
+        const resolvedCustom = path.isAbsolute(customPath) ? customPath : path.resolve(workspacePath, customPath);
+        if (fs.existsSync(resolvedCustom)) {
+            return resolvedCustom;
+        }
+    }
+    if (workspacePath) {
+        const wsScript = path.join(workspacePath, 'server.py');
+        if (fs.existsSync(wsScript)) {
+            return wsScript;
+        }
+    }
+    const extScript = path.join(context.extensionPath, 'server.py');
+    if (fs.existsSync(extScript)) {
+        return extScript;
+    }
+    const parentScript = path.join(context.extensionPath, '..', 'server.py');
+    if (fs.existsSync(parentScript)) {
+        return parentScript;
+    }
+    const fallbackScript = 'C:\\Users\\prana\\ai-kimi-coding-system\\server.py';
+    if (fs.existsSync(fallbackScript)) {
+        return fallbackScript;
+    }
+    return null;
+}
+function resolvePythonBinary(workspacePath, customPython) {
+    if (customPython && customPython !== 'python') {
+        return customPython;
+    }
+    if (workspacePath) {
+        const winVenv = path.join(workspacePath, '.venv', 'Scripts', 'python.exe');
+        if (fs.existsSync(winVenv))
+            return winVenv;
+        const winVenv2 = path.join(workspacePath, 'venv', 'Scripts', 'python.exe');
+        if (fs.existsSync(winVenv2))
+            return winVenv2;
+        const unixVenv = path.join(workspacePath, '.venv', 'bin', 'python');
+        if (fs.existsSync(unixVenv))
+            return unixVenv;
+        const unixVenv2 = path.join(workspacePath, 'venv', 'bin', 'python');
+        if (fs.existsSync(unixVenv2))
+            return unixVenv2;
+    }
+    return 'python';
+}
 function startPythonServer(context) {
     if (serverProcess) {
         return;
     }
+    const config = vscode.workspace.getConfiguration('multiAgent');
+    const customPython = config.get('pythonPath', 'python');
+    const customScript = config.get('serverScriptPath', '');
+    const serverPort = config.get('serverPort', 8000);
+    const serverHost = config.get('serverHost', '127.0.0.1');
     const workspaceFolders = vscode.workspace.workspaceFolders;
     const workspacePath = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
-    const systemServerScript = 'C:\\Users\\prana\\ai-kimi-coding-system\\server.py';
-    const args = [systemServerScript];
+    const serverScript = resolveServerScript(context, workspacePath, customScript);
+    if (!serverScript) {
+        vscode.window.showErrorMessage('Multi-Agent Dev System: Could not locate server.py. Please set multiAgent.serverScriptPath in VS Code Settings.');
+        return;
+    }
+    const provider = config.get('provider', 'ollama');
+    const apiKey = config.get('apiKey', '');
+    const modelName = config.get('modelName', 'qwen3-coder:latest');
+    const pythonBin = resolvePythonBinary(workspacePath, customPython);
+    const args = [serverScript];
     if (workspacePath) {
         args.push(workspacePath);
     }
+    args.push('--host', serverHost, '--port', String(serverPort));
+    const out = getOutputChannel();
+    out.appendLine(`[Launching Server] ${pythonBin} ${args.join(' ')} (Provider: ${provider}, Model: ${modelName})`);
     try {
-        serverProcess = child_process.spawn('python', args, {
-            cwd: workspacePath || 'C:\\Users\\prana\\ai-kimi-coding-system',
-            env: { ...process.env }
+        const cwd = workspacePath || path.dirname(serverScript);
+        serverProcess = child_process.spawn(pythonBin, args, {
+            cwd,
+            env: {
+                ...process.env,
+                LLM_PROVIDER: provider,
+                OPENAI_API_KEY: apiKey,
+                LLM_MODEL: modelName
+            }
         });
         serverProcess.stdout?.on('data', (data) => {
-            console.log(`[Multi-Agent Server] ${data}`);
+            out.appendLine(`[Server STDOUT] ${data}`);
         });
         serverProcess.stderr?.on('data', (data) => {
-            console.error(`[Multi-Agent Server Error] ${data}`);
+            out.appendLine(`[Server STDERR] ${data}`);
         });
         if (serverProcess) {
-            serverProcess.on('exit', () => {
+            serverProcess.on('exit', (code) => {
+                out.appendLine(`[Server Exit] Process exited with code ${code}`);
                 serverProcess = null;
             });
-            serverProcess.on('error', () => {
+            serverProcess.on('error', (err) => {
+                out.appendLine(`[Server Error] ${err.message}`);
                 serverProcess = null;
             });
         }
     }
     catch (e) {
         serverProcess = null;
-        console.error(`Failed to auto-start python server: ${e}`);
+        out.appendLine(`Failed to auto-start python server: ${e}`);
+        vscode.window.showErrorMessage(`Failed to start Multi-Agent Python server: ${e}`);
     }
 }
 class MultiAgentChatViewProvider {
@@ -117,7 +200,10 @@ class MultiAgentChatViewProvider {
     }
     resolveWebviewView(webviewView, context, _token) {
         this._view = webviewView;
-        startPythonServer(this._context);
+        const config = vscode.workspace.getConfiguration('multiAgent');
+        if (config.get('autoStartServer', true)) {
+            startPythonServer(this._context);
+        }
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._context.extensionUri]
@@ -148,6 +234,11 @@ class MultiAgentChatViewProvider {
     _getHtmlForWebview(webview) {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, 'media', 'main.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, 'media', 'main.css'));
+        const config = vscode.workspace.getConfiguration('multiAgent');
+        const serverPort = config.get('serverPort', 8000);
+        const serverHost = config.get('serverHost', '127.0.0.1');
+        const provider = config.get('provider', 'ollama');
+        const modelName = config.get('modelName', 'qwen3-coder:latest');
         const workspaceFolders = vscode.workspace.workspaceFolders;
         const workspacePath = workspaceFolders && workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
         return `<!DOCTYPE html>
@@ -159,6 +250,10 @@ class MultiAgentChatViewProvider {
     <title>Multi-Agent Dev System</title>
     <script>
         window.workspacePath = ${JSON.stringify(workspacePath)};
+        window.serverPort = ${JSON.stringify(serverPort)};
+        window.serverHost = ${JSON.stringify(serverHost)};
+        window.provider = ${JSON.stringify(provider)};
+        window.modelName = ${JSON.stringify(modelName)};
     </script>
 </head>
 <body>

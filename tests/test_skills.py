@@ -67,7 +67,7 @@ class TestSkillsArchitecture(unittest.TestCase):
         self.assertIn("fastapi-backend", names)
         self.assertIn("react-frontend", names)
         self.assertIn("database-migration", names)
-        self.assertIn("docker-deployment", names)
+        self.assertIn("unit-testing", names)
 
     def test_02_workspace_custom_skill_discovered(self) -> None:
         ws_skills = self.workspace_root / "skills" / "my_custom_skill"
@@ -110,8 +110,38 @@ class TestSkillsArchitecture(unittest.TestCase):
         self.assertIn("fastapi-backend", names)
 
         # Execute apply_skill
-        applied = agent._execute_tool("apply_skill", {"skill_name": "docker-deployment"})
-        self.assertIn("APPLIED SKILL: DOCKER-DEPLOYMENT", applied)
+        applied = agent._execute_tool("apply_skill", {"skill_name": "unit-testing"})
+        self.assertIn("APPLIED SKILL: UNIT-TESTING", applied)
+
+    def test_05_auto_match_skills(self) -> None:
+        mgr = SkillManager()
+        # Test FastAPI backend prompt matching
+        matched_fastapi = mgr.auto_match_skills("Create a FastAPI backend for user management")
+        self.assertTrue(any(s.name == "fastapi-backend" for s in matched_fastapi))
+
+        # Test React frontend prompt matching
+        matched_react = mgr.auto_match_skills("Build a React frontend UI dashboard")
+        self.assertTrue(any(s.name == "react-frontend" for s in matched_react))
+
+        # Test Unit testing prompt matching
+        matched_tests = mgr.auto_match_skills("Write pytest unit tests for backend routes")
+        self.assertTrue(any(s.name == "unit-testing" for s in matched_tests))
+
+    def test_06_workspace_agent_auto_activates_skill(self) -> None:
+        tool_calls_fired = []
+        def on_tool(name: str, args: dict, result: str):
+            tool_calls_fired.append((name, args))
+
+        agent = WorkspaceAgent(
+            llm_provider=self.llm,
+            sandbox=self.sandbox,
+            state_manager=self.state_manager
+        )
+
+        res = agent.process_request("I need a FastAPI backend API endpoint", on_tool_call=on_tool)
+        # Verify apply_skill tool execution was auto-triggered and emitted to on_tool_call listener
+        auto_skills = [args.get("skill_name") for name, args in tool_calls_fired if name == "apply_skill"]
+        self.assertIn("fastapi-backend", auto_skills)
 
 
 if __name__ == "__main__":

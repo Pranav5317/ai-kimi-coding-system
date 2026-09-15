@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from config import config
-from llm import OllamaProvider
+from llm import get_llm_provider, OllamaProvider
 from tools import WorkspaceSandbox, DevServerManager
 from state import ProjectStateManager
 from diary import CodeDiary
@@ -26,11 +26,20 @@ from agents import (
     WorkspaceAgent
 )
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global core
+    if core is None:
+        core = SystemCore()
+    yield
 
 app = FastAPI(
     title="Multi-Agent Software Development System API",
     description="Backend API powering the VS Code Extension and Web UI for the 5-Agent team.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for VS Code Webview and local origins
@@ -52,13 +61,7 @@ class SystemCore:
         if workspace_path:
             config.set_workspace(workspace_path)
 
-        self.llm = OllamaProvider(
-            base_url=config.ollama_base_url,
-            model=config.default_model,
-            default_temperature=config.temperature,
-            num_ctx=config.num_ctx,
-            timeout=config.llm_timeout
-        )
+        self.llm = get_llm_provider()
         self.diary = CodeDiary(config.diary_file)
         self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
         self.server_manager = DevServerManager(workspace_root=config.workspace_dir, diary=self.diary)
@@ -126,13 +129,6 @@ class SystemCore:
 
 # Global core instance
 core: Optional[SystemCore] = None
-
-
-@app.on_event("startup")
-def startup_event():
-    global core
-    if core is None:
-        core = SystemCore()
 
 
 @app.get("/api/health")
@@ -342,7 +338,7 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
                 async with request_lock:
                     await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
 
-                    mutating_tools = {"create_file", "edit_file", "write_file", "delete_file", "run_command", "start_dev_server", "stop_dev_server"}
+                    mutating_tools = {"create_file", "edit_file", "write_file", "delete_file", "run_command", "start_dev_server", "stop_dev_server", "draft_implementation_plan"}
 
                     def pre_tool_call(tool_name: str, args: dict) -> bool:
                         target = args.get("path") or args.get("file_path") or args.get("file") or args.get("target") or args.get("command") or ""
@@ -438,7 +434,7 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
         ws_manager.disconnect(websocket)
 
 
-if __name__ == "__main__":
+def main():
     import uvicorn
     import argparse
 
@@ -449,7 +445,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.workspace_dir:
+        global core
         core = SystemCore(workspace_path=args.workspace_dir)
 
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
 

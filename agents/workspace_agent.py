@@ -124,7 +124,7 @@ SKILL_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "skill_name": {
                         "type": "string",
-                        "description": "The name of the skill module to load and apply (e.g. 'fastapi-backend', 'react-frontend', 'docker-deployment')."
+                        "description": "The name of the skill module to load and apply (e.g. 'fastapi-backend', 'react-frontend', 'unit-testing')."
                     }
                 },
                 "required": ["skill_name"]
@@ -133,9 +133,50 @@ SKILL_TOOLS: List[Dict[str, Any]] = [
     }
 ]
 
+# Planning tools for technical architecture review
+PLANNING_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "draft_implementation_plan",
+            "description": (
+                "Drafts a formal technical implementation plan (implementation_plan.md) for user review "
+                "before executing complex or multi-file architectural changes. "
+                "Presents an interactive Approval/Review card in the UI."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short title describing the feature or architectural change plan."
+                    },
+                    "plan_markdown": {
+                        "type": "string",
+                        "description": "Detailed markdown implementation plan content including goal, proposed file changes ([NEW], [MODIFY]), and verification steps."
+                    }
+                },
+                "required": ["title", "plan_markdown"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_implementation_plan",
+            "description": "Reads the current technical implementation plan (implementation_plan.md) from the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    }
+]
+
 # Combined tool definitions for function-calling LLMs
 ALL_WORKSPACE_TOOLS: List[Dict[str, Any]] = (
-    FILESYSTEM_TOOLS + SERVER_TOOLS + DELEGATION_TOOLS + PROJECT_STATE_TOOLS + SKILL_TOOLS
+    FILESYSTEM_TOOLS + SERVER_TOOLS + DELEGATION_TOOLS + PROJECT_STATE_TOOLS + SKILL_TOOLS + PLANNING_TOOLS
 )
 
 
@@ -234,6 +275,9 @@ class WorkspaceAgent(BaseAgent):
             # Skill tools
             "list_available_skills": lambda: json.dumps(self.skill_manager.list_skills(), indent=2),
             "apply_skill": lambda skill_name: self.skill_manager.apply_skill(skill_name),
+            # Planning tools
+            "draft_implementation_plan": self.draft_implementation_plan,
+            "read_implementation_plan": self.read_implementation_plan,
         }
 
         # Load persistent chat history for this project if it exists
@@ -359,6 +403,40 @@ class WorkspaceAgent(BaseAgent):
             if self.diary:
                 self.diary.record("DELEGATE_TASK", clean_target, "ERROR", str(e))
             return err
+
+    def draft_implementation_plan(self, title: str, plan_markdown: str) -> str:
+        """
+        Drafts an implementation plan (implementation_plan.md) in the workspace sandbox
+        and embeds approval card metadata tag.
+        """
+        header = f"# Implementation Plan - {title}\n\n"
+        content = plan_markdown if plan_markdown.startswith("# Implementation Plan") else f"{header}{plan_markdown}"
+        self.sandbox.create_file("implementation_plan.md", content)
+
+        plan_file = self.sandbox.workspace_root / "implementation_plan.md"
+        plan_url = plan_file.as_uri()
+
+        plan_meta = json.dumps({
+            "title": title,
+            "plan_url": plan_url,
+            "plan_path": "implementation_plan.md"
+        })
+
+        if self.diary:
+            self.diary.record("DRAFT_PLAN", "implementation_plan.md", "SUCCESS", f"Drafted plan: {title}")
+
+        return (
+            f"<!-- IMPLEMENTATION_PLAN: {plan_meta} -->\n\n"
+            f"📋 **Implementation Plan Drafted**: [{title}]({plan_url})\n\n"
+            f"{content}"
+        )
+
+    def read_implementation_plan(self) -> str:
+        """Reads implementation_plan.md from workspace sandbox."""
+        plan_path = self.sandbox.workspace_root / "implementation_plan.md"
+        if not plan_path.exists():
+            return "No active implementation plan found (implementation_plan.md does not exist)."
+        return plan_path.read_text(encoding="utf-8")
 
     def setup_project_structure(
         self,
@@ -702,6 +780,19 @@ class WorkspaceAgent(BaseAgent):
         """
         self.add_message("user", user_input)
         self.sandbox.clear_tracked_changes()
+
+        # Auto-detect and activate skills matching the user prompt
+        matched_skills = self.skill_manager.auto_match_skills(user_input)
+        for skill in matched_skills:
+            skill_result = self._execute_tool("apply_skill", {"skill_name": skill.name})
+            if on_tool_call:
+                on_tool_call("apply_skill", {"skill_name": skill.name}, skill_result)
+
+            self.history.append({
+                "role": "system",
+                "content": f"⚡ [AUTO-ACTIVATED SKILL: {skill.name.upper()}]\n{skill_result}"
+            })
+            self.save_history_to_disk()
 
         iteration = 0
         while iteration < self.max_tool_iterations:

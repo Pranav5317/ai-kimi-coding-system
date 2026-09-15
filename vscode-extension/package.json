@@ -3,7 +3,21 @@
   "displayName": "Multi-Agent Dev System",
   "description": "5-Agent Multi-Agent Software Development System UI panel for VS Code",
   "version": "1.0.0",
-  "publisher": "antigravity",
+  "publisher": "PranavApsingekar",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pranav5317/ai-kimi-coding-system.git"
+  },
+  "keywords": [
+    "ai",
+    "multi-agent",
+    "coding-assistant",
+    "pair-programming",
+    "fastapi",
+    "react"
+  ],
+  "license": "MIT",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -48,16 +62,70 @@
         "command": "multiAgent.restartServer",
         "title": "Multi-Agent: Restart Backend Server"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Multi-Agent System",
+      "properties": {
+        "multiAgent.provider": {
+          "type": "string",
+          "default": "ollama",
+          "enum": ["ollama", "openai", "groq", "deepseek", "anthropic"],
+          "description": "LLM Provider backend used for multi-agent reasoning (Ollama local, OpenAI, Groq, DeepSeek, Anthropic)."
+        },
+        "multiAgent.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for cloud LLM provider (OpenAI, Groq, DeepSeek, Anthropic)."
+        },
+        "multiAgent.modelName": {
+          "type": "string",
+          "default": "qwen3-coder:latest",
+          "description": "Default model name (e.g. 'qwen3-coder:latest', 'gpt-4o', 'llama-3.3-70b-versatile')."
+        },
+        "multiAgent.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python executable used to launch server.py (e.g. 'python', 'python3', or virtualenv path)."
+        },
+        "multiAgent.serverPort": {
+          "type": "number",
+          "default": 8000,
+          "description": "Port number for the FastAPI backend server."
+        },
+        "multiAgent.serverHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host IP for the FastAPI backend server."
+        },
+        "multiAgent.serverScriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom absolute or workspace-relative path to server.py. Leave empty for auto-detection."
+        },
+        "multiAgent.autoStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start backend FastAPI server on extension launch."
+        },
+        "multiAgent.requirePermission": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require human-in-the-loop approval before executing file writes or system commands."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "npx -p typescript tsc -p ./",
+    "watch": "npx -p typescript tsc -watch -p ./",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/vscode": "^1.75.0",
     "@types/node": "16.x",
+    "@vscode/vsce": "^2.19.0",
     "typescript": "^5.0.0"
   }
 }

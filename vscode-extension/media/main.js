@@ -12,8 +12,17 @@
   const openStateBtn = document.getElementById('open-state-btn');
 
   let ws = null;
-  let serverPort = 8000;
+  let serverPort = window.serverPort || 8000;
+  let serverHost = window.serverHost || '127.0.0.1';
   let thinkingEl = null;
+
+  if (connectionDot) {
+    connectionDot.addEventListener('click', () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+      }
+    });
+  }
 
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -56,12 +65,14 @@
   function setConnectionStatus(status, text) {
     if (!connectionDot) return;
     connectionDot.className = `status-dot ${status}`;
-    connectionDot.title = `Server status: ${text || status}`;
+    connectionDot.title = `Server status: ${text || status} (Click to reconnect)`;
   }
 
   function connectWebSocket() {
     setConnectionStatus('connecting', 'Connecting to backend server...');
-    const wsUrl = `ws://127.0.0.1:${serverPort}/ws` + (window.workspacePath ? `?workspace=${encodeURIComponent(window.workspacePath)}` : '');
+    serverPort = window.serverPort || 8000;
+    serverHost = window.serverHost || '127.0.0.1';
+    const wsUrl = `ws://${serverHost}:${serverPort}/ws` + (window.workspacePath ? `?workspace=${encodeURIComponent(window.workspacePath)}` : '');
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -86,8 +97,7 @@
     ws.onclose = () => {
       setConnectionStatus('disconnected', 'Disconnected from server');
       removeThinkingIndicator();
-      appendSystemMessage('Disconnected from server. Reconnecting in 3s...');
-      setTimeout(connectWebSocket, 3000);
+      setTimeout(connectWebSocket, 4000);
     };
 
     ws.onerror = () => {
@@ -296,12 +306,46 @@
       text = text.replace(/<!--\s*CHANGES_CARD:\s*[\s\S]*?\s*-->/, '___CHANGES_CARD_PLACEHOLDER___');
     }
 
+    // Extract and render IMPLEMENTATION_PLAN widget if comment exists
+    let planHtml = '';
+    const planMatch = text.match(/<!--\s*IMPLEMENTATION_PLAN:\s*([\s\S]*?)\s*-->/);
+    if (planMatch) {
+      try {
+        const planData = JSON.parse(planMatch[1]);
+        const planTitle = planData.title || 'Technical Architecture Plan';
+        const planPath = planData.plan_path || 'implementation_plan.md';
+
+        planHtml = `
+          <div class="plan-card-widget">
+            <div class="plan-card-header">
+              <span class="plan-card-title">📋 Implementation Plan Proposed</span>
+              <span class="tool-status-badge success">Pending Review</span>
+            </div>
+            <div class="plan-card-body">
+              <strong>Agent 5</strong> has drafted an implementation plan: <code>${planTitle}</code>.
+            </div>
+            <div class="plan-card-actions">
+              <button class="review-plan-btn" data-path="${planPath}">📄 Review Plan</button>
+              <button class="reject-plan-btn">❌ Reject / Edit</button>
+              <button class="approve-plan-btn">✅ Approve & Execute</button>
+            </div>
+          </div>`;
+      } catch (err) {
+        console.error("Failed to parse IMPLEMENTATION_PLAN JSON", err);
+      }
+
+      text = text.replace(/<!--\s*IMPLEMENTATION_PLAN:\s*[\s\S]*?\s*-->/, '___IMPLEMENTATION_PLAN_PLACEHOLDER___');
+    }
+
     // Escape HTML to prevent XSS injection
     text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    // Re-insert unescaped cardHtml widget at placeholder location
+    // Re-insert unescaped cardHtml & planHtml widgets at placeholder location
     if (cardHtml) {
       text = text.replace('___CHANGES_CARD_PLACEHOLDER___', cardHtml);
+    }
+    if (planHtml) {
+      text = text.replace('___IMPLEMENTATION_PLAN_PLACEHOLDER___', planHtml);
     }
 
     // Fenced code blocks ```lang ... ```
@@ -374,6 +418,13 @@
     card.className = 'tool-card';
 
     const icon = getToolIcon(tool);
+    let displayName = tool;
+    let badgeText = 'Success';
+    if (tool === 'apply_skill' && args && args.skill_name) {
+      displayName = `Auto-Activated Skill: ${args.skill_name}`;
+      badgeText = 'Skill Active';
+    }
+
     const argsStr = args && Object.keys(args).length > 0 ? JSON.stringify(args) : '';
     const safeResult = String(result || '');
 
@@ -381,8 +432,8 @@
       <div class="tool-card-header">
         <div class="tool-info">
           <span class="tool-icon">${icon}</span>
-          <span class="tool-name">${tool}</span>
-          <span class="tool-status-badge success">Success</span>
+          <span class="tool-name">${displayName}</span>
+          <span class="tool-status-badge success">${badgeText}</span>
         </div>
         <span class="tool-toggle-arrow">►</span>
       </div>
@@ -567,6 +618,48 @@
   }
 
   chatHistory.addEventListener('click', (e) => {
+    const reviewPlanBtn = e.target.closest('.review-plan-btn');
+    if (reviewPlanBtn) {
+      e.preventDefault();
+      const planPath = reviewPlanBtn.getAttribute('data-path') || 'implementation_plan.md';
+      vscode.postMessage({ command: 'openFile', filePath: planPath });
+      return;
+    }
+
+    const approvePlanBtn = e.target.closest('.approve-plan-btn');
+    if (approvePlanBtn) {
+      e.preventDefault();
+      const widget = approvePlanBtn.closest('.plan-card-widget');
+      if (widget) {
+        const badge = widget.querySelector('.tool-status-badge');
+        if (badge) {
+          badge.className = 'tool-status-badge success';
+          badge.textContent = 'APPROVED';
+        }
+        approvePlanBtn.disabled = true;
+      }
+      promptInput.value = 'Approved implementation plan. Proceed with execution.';
+      sendPrompt();
+      return;
+    }
+
+    const rejectPlanBtn = e.target.closest('.reject-plan-btn');
+    if (rejectPlanBtn) {
+      e.preventDefault();
+      const widget = rejectPlanBtn.closest('.plan-card-widget');
+      if (widget) {
+        const badge = widget.querySelector('.tool-status-badge');
+        if (badge) {
+          badge.className = 'tool-status-badge error';
+          badge.textContent = 'REJECTED';
+        }
+        rejectPlanBtn.disabled = true;
+      }
+      promptInput.value = 'Revising plan: ';
+      promptInput.focus();
+      return;
+    }
+
     const reviewBtn = e.target.closest('.review-changes-btn');
     if (reviewBtn) {
       e.preventDefault();

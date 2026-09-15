@@ -16,6 +16,9 @@ except ImportError:
 @dataclass
 class AppConfig:
     """Application configuration settings."""
+    llm_provider: Optional[str] = None
+    api_key: Optional[str] = None
+    api_base_url: Optional[str] = None
     ollama_base_url: Optional[str] = None
     default_model: Optional[str] = None
     temperature: Optional[float] = None
@@ -26,6 +29,12 @@ class AppConfig:
     agent5_system_prompt: Optional[str] = None
 
     def __post_init__(self):
+        if self.llm_provider is None:
+            self.llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+        if self.api_key is None:
+            self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY", "")
+        if self.api_base_url is None:
+            self.api_base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_API_BASE", "")
         if self.ollama_base_url is None:
             self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         if self.default_model is None:

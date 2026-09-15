@@ -527,9 +527,10 @@ class TestWorkspaceAgent(unittest.TestCase):
 
         self.agent5.process_request("Create database migration", on_tool_call=tool_cb)
 
-        self.assertEqual(len(recorded_tools), 1)
-        self.assertEqual(recorded_tools[0][0], "delegate_task")
-        self.assertIn("CREATE TABLE items", recorded_tools[0][2])
+        recorded_llm_tools = [t for t in recorded_tools if t[0] != "apply_skill"]
+        self.assertEqual(len(recorded_llm_tools), 1)
+        self.assertEqual(recorded_llm_tools[0][0], "delegate_task")
+        self.assertIn("CREATE TABLE items", recorded_llm_tools[0][2])
 
     # 21. Delegation Rejects Invalid Target Agent Safely
     def test_21_delegation_rejects_invalid_targets(self):
@@ -857,7 +858,8 @@ class TestWorkspaceAgent(unittest.TestCase):
 
         # 3. Assertions
         self.assertIn("The task management application is fully implemented", final_result)
-        self.assertEqual(executed_tools, [
+        llm_executed_tools = [t for t in executed_tools if t != "apply_skill"]
+        self.assertEqual(llm_executed_tools, [
             "read_project_state",
             "delegate_task",
             "update_project_state",
