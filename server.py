@@ -193,6 +193,27 @@ def get_diary_entries(limit: int = 20):
     return {"entries": recent}
 
 
+@app.get("/api/bus_history")
+def get_bus_history():
+    if core is None:
+        raise HTTPException(status_code=500, detail="Core not initialized.")
+    history = core.orchestrator.get_message_history()
+    formatted = []
+    for msg in history:
+        msg_type_str = msg.message_type.value if hasattr(msg.message_type, "value") else str(msg.message_type)
+        formatted.append({
+            "message_id": msg.message_id,
+            "sender": msg.sender,
+            "recipient": msg.recipient,
+            "message_type": msg_type_str,
+            "content": msg.content,
+            "correlation_id": msg.correlation_id,
+            "timestamp": getattr(msg, "timestamp", None),
+            "metadata": msg.metadata
+        })
+    return {"messages": formatted}
+
+
 @app.post("/api/workspace")
 def switch_workspace_endpoint(payload: Dict[str, Any]):
     if core is None:

@@ -65,6 +65,10 @@
       {
         "command": "multiAgent.fixTerminalError",
         "title": "Multi-Agent: Fix Error / Selection with Agent 5"
+      },
+      {
+        "command": "multiAgent.openDiary",
+        "title": "Multi-Agent: Open CODE_DIARY.md Activity Log"
       }
     ],
     "configuration": {

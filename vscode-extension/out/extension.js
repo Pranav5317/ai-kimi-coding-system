@@ -89,6 +89,19 @@ function activate(context) {
             ? `🤖 Sent selection to Multi-Agent System for debugging!`
             : `🤖 Multi-Agent Debugger triggered!`);
     }));
+    context.subscriptions.push(vscode.commands.registerCommand('multiAgent.openDiary', async () => {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders && workspaceFolders.length > 0) {
+            const diaryPath = vscode.Uri.file(path.join(workspaceFolders[0].uri.fsPath, 'CODE_DIARY.md'));
+            try {
+                const doc = await vscode.workspace.openTextDocument(diaryPath);
+                await vscode.window.showTextDocument(doc);
+            }
+            catch (e) {
+                vscode.window.showErrorMessage(`CODE_DIARY.md not found: ${e}`);
+            }
+        }
+    }));
 }
 function deactivate() {
     if (serverProcess) {
@@ -330,6 +343,9 @@ class MultiAgentChatViewProvider {
         <button class="tab-btn" data-tab="agents-tab">
             <span class="tab-icon">👥</span> Team & Skills
         </button>
+        <button class="tab-btn" data-tab="activity-tab">
+            <span class="tab-icon">📜</span> Activity & Bus
+        </button>
     </div>
 
     <div id="chat-tab" class="tab-content active">
@@ -357,6 +373,14 @@ class MultiAgentChatViewProvider {
 
     <div id="agents-tab" class="tab-content">
         <div id="agents-list">Loading agent team & skills...</div>
+    </div>
+
+    <div id="activity-tab" class="tab-content">
+        <div class="tab-header-actions">
+            <button id="refresh-activity-btn" class="secondary-btn">🔄 Refresh Activity</button>
+            <button id="open-diary-btn" class="secondary-btn">📄 Open CODE_DIARY.md</button>
+        </div>
+        <div id="activity-viewer">Loading MessageBus & Activity Log...</div>
     </div>
 
     <script src="${scriptUri}"></script>

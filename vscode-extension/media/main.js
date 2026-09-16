@@ -37,6 +37,8 @@
         fetchState();
       } else if (targetId === 'agents-tab') {
         fetchAgents();
+      } else if (targetId === 'activity-tab') {
+        fetchActivity();
       }
     });
   });
@@ -52,6 +54,9 @@
     });
   }
 
+  const refreshActivityBtn = document.getElementById('refresh-activity-btn');
+  const openDiaryBtn = document.getElementById('open-diary-btn');
+
   if (refreshStateBtn) {
     refreshStateBtn.addEventListener('click', fetchState);
   }
@@ -59,6 +64,16 @@
   if (openStateBtn) {
     openStateBtn.addEventListener('click', () => {
       vscode.postMessage({ command: 'openFile', filePath: 'PROJECT_STATE.md' });
+    });
+  }
+
+  if (refreshActivityBtn) {
+    refreshActivityBtn.addEventListener('click', fetchActivity);
+  }
+
+  if (openDiaryBtn) {
+    openDiaryBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'openFile', filePath: 'CODE_DIARY.md' });
     });
   }
 
@@ -629,6 +644,99 @@
           .catch(() => {});
       })
       .catch(() => {});
+  }
+
+  function fetchActivity() {
+    const activityViewer = document.getElementById('activity-viewer');
+    if (!activityViewer) return;
+
+    activityViewer.innerHTML = '<div class="thinking-spinner"><div class="spinner-ring"></div><span>Loading MessageBus & Activity Log...</span></div>';
+
+    Promise.all([
+      fetch(`http://127.0.0.1:${serverPort}/api/bus_history`).then(r => r.json()).catch(() => ({ messages: [] })),
+      fetch(`http://127.0.0.1:${serverPort}/api/diary`).then(r => r.json()).catch(() => ({ entries: [] }))
+    ]).then(([busData, diaryData]) => {
+      activityViewer.innerHTML = '';
+
+      // 1. MessageBus Inter-Agent Routing Traffic
+      const busSection = document.createElement('div');
+      busSection.className = 'activity-section';
+      
+      const h3Bus = document.createElement('h3');
+      h3Bus.className = 'activity-section-title';
+      h3Bus.innerHTML = '📡 MessageBus Inter-Agent Traffic';
+      busSection.appendChild(h3Bus);
+
+      const messages = busData.messages || [];
+      if (messages.length === 0) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.className = 'empty-activity-log';
+        emptyMsg.textContent = 'No inter-agent messages routed through the bus yet in this session.';
+        busSection.appendChild(emptyMsg);
+      } else {
+        const busContainer = document.createElement('div');
+        busContainer.className = 'bus-log-list';
+
+        messages.forEach(msg => {
+          const card = document.createElement('div');
+          card.className = 'bus-card';
+
+          const header = document.createElement('div');
+          header.className = 'bus-card-header';
+
+          const route = document.createElement('div');
+          route.className = 'bus-route';
+          route.innerHTML = `<span class="agent-pill sender">${msg.sender}</span> <span class="route-arrow">➔</span> <span class="agent-pill recipient">${msg.recipient}</span>`;
+
+          const typeBadge = document.createElement('span');
+          const msgTypeStr = String(msg.message_type || 'INFO').toLowerCase();
+          typeBadge.className = `msg-type-badge ${msgTypeStr}`;
+          typeBadge.textContent = msg.message_type;
+
+          header.appendChild(route);
+          header.appendChild(typeBadge);
+          card.appendChild(header);
+
+          if (msg.content) {
+            const body = document.createElement('div');
+            body.className = 'bus-card-body';
+            const cleanContent = String(msg.content).length > 250 ? String(msg.content).slice(0, 247) + '...' : String(msg.content);
+            body.textContent = cleanContent;
+            card.appendChild(body);
+          }
+
+          busContainer.appendChild(card);
+        });
+        busSection.appendChild(busContainer);
+      }
+
+      activityViewer.appendChild(busSection);
+
+      // 2. CODE_DIARY.md Activity Entries
+      const diarySection = document.createElement('div');
+      diarySection.className = 'activity-section';
+      diarySection.style.marginTop = '20px';
+
+      const h3Diary = document.createElement('h3');
+      h3Diary.className = 'activity-section-title';
+      h3Diary.innerHTML = '📝 Workspace Code Diary (CODE_DIARY.md)';
+      diarySection.appendChild(h3Diary);
+
+      const entries = diaryData.entries || [];
+      if (entries.length === 0) {
+        const emptyDiary = document.createElement('div');
+        emptyDiary.className = 'empty-activity-log';
+        emptyDiary.textContent = 'No actions recorded in CODE_DIARY.md yet.';
+        diarySection.appendChild(emptyDiary);
+      } else {
+        const diaryPre = document.createElement('pre');
+        diaryPre.className = 'diary-viewer-pre';
+        diaryPre.textContent = entries.join('\n');
+        diarySection.appendChild(diaryPre);
+      }
+
+      activityViewer.appendChild(diarySection);
+    });
   }
 
   chatHistory.addEventListener('click', (e) => {
