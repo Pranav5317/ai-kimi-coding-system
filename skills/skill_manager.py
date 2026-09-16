@@ -67,9 +67,14 @@ class SkillManager:
             search_dirs.append(self.builtin_dir)
 
         if self.workspace_root:
-            ws_skills = self.workspace_root / "skills"
-            if ws_skills.exists():
-                search_dirs.append(ws_skills)
+            for sub in ("skills", ".vscode/skills", ".agent/skills"):
+                ws_s = self.workspace_root / sub
+                if ws_s.exists():
+                    search_dirs.append(ws_s)
+
+        user_home_skills = Path.home() / ".multi-agent" / "skills"
+        if user_home_skills.exists():
+            search_dirs.append(user_home_skills)
 
         for sdir in search_dirs:
             for root, _, files in os.walk(sdir):

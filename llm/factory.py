@@ -3,6 +3,7 @@ from config import config
 from llm.base import BaseLLMProvider
 from llm.ollama_client import OllamaProvider
 from llm.openai_client import OpenAIProvider
+from llm.anthropic_client import AnthropicProvider
 
 
 def get_llm_provider(
@@ -20,7 +21,15 @@ def get_llm_provider(
     key = api_key if api_key is not None else config.api_key
     url = base_url if base_url is not None else config.api_base_url
 
-    if p_type in ["openai", "groq", "deepseek", "anthropic"]:
+    if p_type == "anthropic":
+        target_model = "claude-3-5-sonnet-20241022" if m_name.startswith("qwen") else m_name
+        return AnthropicProvider(
+            api_key=key or "",
+            model_name=target_model,
+            base_url=url or "https://api.anthropic.com/v1",
+            timeout=config.llm_timeout or 300
+        )
+    elif p_type in ["openai", "groq", "deepseek"]:
         default_url = "https://api.openai.com/v1"
         if p_type == "groq":
             default_url = "https://api.groq.com/openai/v1"

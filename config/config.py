@@ -24,6 +24,7 @@ class AppConfig:
     temperature: Optional[float] = None
     num_ctx: Optional[int] = None
     llm_timeout: Optional[int] = None
+    max_tool_iterations: Optional[int] = None
     workspace_dir: Optional[Path] = None
     diary_file: Optional[Path] = None
     agent5_system_prompt: Optional[str] = None
@@ -45,6 +46,8 @@ class AppConfig:
             self.num_ctx = int(os.getenv("LLM_NUM_CTX") or os.getenv("NUM_CTX", "8192"))
         if self.llm_timeout is None:
             self.llm_timeout = int(os.getenv("LLM_TIMEOUT", "300"))
+        if self.max_tool_iterations is None:
+            self.max_tool_iterations = int(os.getenv("MAX_TOOL_ITERATIONS", "25"))
         if self.workspace_dir is None:
             env_ws = os.getenv("WORKSPACE_DIR")
             if env_ws:

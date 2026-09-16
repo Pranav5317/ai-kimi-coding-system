@@ -498,6 +498,85 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Code Header Actions & ⚡ Apply to Editor Button */
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.code-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apply-code-btn {
+  background: var(--vscode-button-background, #007acc);
+  color: var(--vscode-button-foreground, #ffffff);
+  border: none;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+
+.apply-code-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.02);
+}
+
+/* @ Mentions & / Slash Autocomplete Popups */
+.autocomplete-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  right: 12px;
+  margin-bottom: 6px;
+  background: var(--card-bg, #1e1e1e);
+  border: 1px solid var(--accent-color, #007acc);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.popup-header {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-color, #007acc);
+  border-bottom: 1px solid var(--card-border, #333333);
+}
+
+.popup-item {
+  padding: 8px 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.popup-item:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.popup-title {
+  font-weight: 600;
+  color: var(--fg-color, #ffffff);
+}
+
+.popup-desc {
+  font-size: 10px;
+  color: #a0aec0;
+  margin-left: auto;
+}
+
 /* Input Area */
 .input-container {
   border-top: 1px solid var(--card-border);
@@ -541,19 +620,26 @@ body {
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   color: #ffffff;
   border: none;
-  border-radius: 6px;
   padding: 6px 14px;
-  cursor: pointer;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
-  font-size: 11px;
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
-.primary-btn:hover {
-  opacity: 0.9;
+.primary-btn.stop-btn {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid #f87171 !important;
+}
+
+.primary-btn.stop-btn:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
   transform: translateY(-1px);
 }
 

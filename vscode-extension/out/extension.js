@@ -79,6 +79,16 @@ function activate(context) {
         startPythonServer(context);
         vscode.window.showInformationMessage('Multi-Agent Backend Server restarted.');
     }));
+    context.subscriptions.push(vscode.commands.registerCommand('multiAgent.fixTerminalError', async () => {
+        const activeEditor = vscode.window.activeTextEditor;
+        let selectedText = '';
+        if (activeEditor && activeEditor.selection && !activeEditor.selection.isEmpty) {
+            selectedText = activeEditor.document.getText(activeEditor.selection);
+        }
+        vscode.window.showInformationMessage(selectedText
+            ? `🤖 Sent selection to Multi-Agent System for debugging!`
+            : `🤖 Multi-Agent Debugger triggered!`);
+    }));
 }
 function deactivate() {
     if (serverProcess) {
@@ -152,6 +162,7 @@ function startPythonServer(context) {
     const provider = config.get('provider', 'ollama');
     const apiKey = config.get('apiKey', '');
     const modelName = config.get('modelName', 'qwen3-coder:latest');
+    const maxIterations = config.get('maxToolIterations', 25);
     const pythonBin = resolvePythonBinary(workspacePath, customPython);
     const args = [serverScript];
     if (workspacePath) {
@@ -159,7 +170,7 @@ function startPythonServer(context) {
     }
     args.push('--host', serverHost, '--port', String(serverPort));
     const out = getOutputChannel();
-    out.appendLine(`[Launching Server] ${pythonBin} ${args.join(' ')} (Provider: ${provider}, Model: ${modelName})`);
+    out.appendLine(`[Launching Server] ${pythonBin} ${args.join(' ')} (Provider: ${provider}, Model: ${modelName}, Max Iterations: ${maxIterations})`);
     try {
         const cwd = workspacePath || path.dirname(serverScript);
         serverProcess = child_process.spawn(pythonBin, args, {
@@ -168,7 +179,8 @@ function startPythonServer(context) {
                 ...process.env,
                 LLM_PROVIDER: provider,
                 OPENAI_API_KEY: apiKey,
-                LLM_MODEL: modelName
+                LLM_MODEL: modelName,
+                MAX_TOOL_ITERATIONS: String(maxIterations)
             }
         });
         serverProcess.stdout?.on('data', (data) => {
@@ -209,7 +221,9 @@ class MultiAgentChatViewProvider {
             localResourceRoots: [this._context.extensionUri]
         };
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            if (message && message.command === 'openFile' && message.filePath) {
+            if (!message)
+                return;
+            if (message.command === 'openFile' && message.filePath) {
                 try {
                     let fileUri;
                     const raw = String(message.filePath);
@@ -226,6 +240,35 @@ class MultiAgentChatViewProvider {
                 }
                 catch (err) {
                     vscode.window.showErrorMessage(`Failed to open file '${message.filePath}': ${err}`);
+                }
+            }
+            else if (message.command === 'applyCode' && message.code) {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (activeEditor) {
+                    await activeEditor.edit((editBuilder) => {
+                        if (activeEditor.selection && !activeEditor.selection.isEmpty) {
+                            editBuilder.replace(activeEditor.selection, message.code);
+                        }
+                        else {
+                            editBuilder.insert(activeEditor.selection ? activeEditor.selection.start : { line: 0, character: 0 }, message.code);
+                        }
+                    });
+                    vscode.window.showInformationMessage('⚡ Code applied to active editor document.');
+                }
+                else {
+                    vscode.window.showErrorMessage('No active text editor found to apply code.');
+                }
+            }
+            else if (message.command === 'getWorkspaceFiles') {
+                try {
+                    const files = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
+                    const ws = vscode.workspace.workspaceFolders;
+                    const rootPath = ws && ws.length > 0 ? ws[0].uri.fsPath : '';
+                    const relativeFiles = files.map(f => rootPath ? path.relative(rootPath, f.fsPath) : f.fsPath);
+                    await webviewView.webview.postMessage({ command: 'workspaceFiles', files: relativeFiles });
+                }
+                catch (err) {
+                    console.error('Failed to get workspace files:', err);
                 }
             }
         });

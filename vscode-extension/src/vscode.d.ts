@@ -17,7 +17,27 @@ declare module 'vscode' {
     export interface WorkspaceConfiguration {
         get<T>(section: string, defaultValue?: T): T;
     }
+    export interface Selection {
+        start: any;
+        end: any;
+        isEmpty: boolean;
+    }
+    export interface TextDocument {
+        uri: Uri;
+        fileName: string;
+        getText(range?: any): string;
+    }
+    export interface TextEditorEdit {
+        replace(location: any, value: string): void;
+        insert(location: any, value: string): void;
+    }
+    export interface TextEditor {
+        document: TextDocument;
+        selection: Selection;
+        edit(callback: (editBuilder: TextEditorEdit) => void): Promise<boolean>;
+    }
     export namespace window {
+        var activeTextEditor: TextEditor | undefined;
         function registerWebviewViewProvider(providerId: string, provider: any): any;
         function showInformationMessage(message: string): void;
         function showErrorMessage(message: string): void;
@@ -26,10 +46,12 @@ declare module 'vscode' {
     }
     export namespace commands {
         function registerCommand(command: string, callback: (...args: any[]) => any): any;
+        function executeCommand(command: string, ...rest: any[]): Promise<any>;
     }
     export namespace workspace {
-        function openTextDocument(uri: Uri): Promise<any>;
+        function openTextDocument(uri: Uri | string): Promise<TextDocument>;
         function getConfiguration(section?: string): WorkspaceConfiguration;
+        function findFiles(include: string, exclude?: string, maxResults?: number): Promise<Uri[]>;
         var workspaceFolders: { uri: Uri }[] | undefined;
     }
     export interface WebviewView {
@@ -39,6 +61,7 @@ declare module 'vscode' {
         options: any;
         html: string;
         asWebviewUri(localResource: Uri): Uri;
+        postMessage(message: any): Promise<boolean>;
     }
     export interface WebviewViewProvider {
         resolveWebviewView(webviewView: WebviewView, context: any, token: any): void;
@@ -61,6 +84,7 @@ declare module 'path' {
     export function resolve(...paths: string[]): string;
     export function isAbsolute(p: string): boolean;
     export function dirname(p: string): string;
+    export function relative(from: string, to: string): string;
 }
 
 declare module 'fs' {

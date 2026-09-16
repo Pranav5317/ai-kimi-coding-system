@@ -23,6 +23,13 @@ class TestLLMFactory(unittest.TestCase):
         self.assertEqual(provider.base_url, "https://api.groq.com/openai/v1")
         self.assertEqual(provider.model_name, "llama-3.3-70b-versatile")
 
+    def test_anthropic_provider(self):
+        from llm.anthropic_client import AnthropicProvider
+        provider = get_llm_provider(provider_type="anthropic", api_key="sk-ant-test", model_name="claude-3-5-sonnet-20241022")
+        self.assertIsInstance(provider, AnthropicProvider)
+        self.assertEqual(provider.model_name, "claude-3-5-sonnet-20241022")
+        self.assertEqual(provider.api_key, "sk-ant-test")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -202,7 +202,7 @@ class WorkspaceAgent(BaseAgent):
         server_manager: Optional[DevServerManager] = None,
         state_manager: Optional[ProjectStateManager] = None,
         orchestrator: Optional[Any] = None,
-        max_tool_iterations: int = 10,
+        max_tool_iterations: int = 25,
         workspace_root: Optional[Path] = None,
         **kwargs: Any
     ):
@@ -768,22 +768,23 @@ class WorkspaceAgent(BaseAgent):
         self,
         user_input: str,
         on_tool_call: Optional[Callable[[str, Dict[str, Any], str], None]] = None,
-        pre_tool_call: Optional[Callable[[str, Dict[str, Any]], bool]] = None
+        pre_tool_call: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
+        cancellation_check: Optional[Callable[[], bool]] = None
     ) -> str:
         """
-        Main reasoning and execution loop for Agent 5:
-        1. Adds user prompt to history.
-        2. Queries LLM with full tool definitions (filesystem + dev server + delegate_task + project_state).
-        3. Parses native tool calls (with fallback to content extraction).
-        4. Validates arguments and executes tools inside the sandbox/orchestrator/state_manager.
-        5. Feeds results back to LLM until final response is produced.
+        Main reasoning and execution loop for Agent 5 with cancellation support.
         """
+        self.stop_requested = False
         self.add_message("user", user_input)
         self.sandbox.clear_tracked_changes()
 
         # Auto-detect and activate skills matching the user prompt
         matched_skills = self.skill_manager.auto_match_skills(user_input)
         for skill in matched_skills:
+            if (cancellation_check and cancellation_check()) or self.stop_requested:
+                self.stop_requested = False
+                return "⏹️ Generation cancelled by user."
+
             skill_result = self._execute_tool("apply_skill", {"skill_name": skill.name})
             if on_tool_call:
                 on_tool_call("apply_skill", {"skill_name": skill.name}, skill_result)
@@ -796,6 +797,10 @@ class WorkspaceAgent(BaseAgent):
 
         iteration = 0
         while iteration < self.max_tool_iterations:
+            if (cancellation_check and cancellation_check()) or self.stop_requested:
+                self.stop_requested = False
+                return "⏹️ Generation cancelled by user."
+
             iteration += 1
             messages = self._prepare_messages()
 
@@ -825,6 +830,10 @@ class WorkspaceAgent(BaseAgent):
                 self.save_history_to_disk()
 
                 for call in tool_calls:
+                    if (cancellation_check and cancellation_check()) or self.stop_requested:
+                        self.stop_requested = False
+                        return "⏹️ Generation cancelled by user."
+
                     fn_info = call.get("function", {})
                     fn_name = fn_info.get("name", "")
                     fn_args = fn_info.get("arguments", {})
@@ -850,6 +859,9 @@ class WorkspaceAgent(BaseAgent):
                     # Notify caller (CLI / test suite)
                     if on_tool_call:
                         on_tool_call(fn_name, parsed_args, tool_result)
+
+                    if any(k in tool_result for k in ("Error", "FAILED", "Violation", "failed")):
+                        tool_result = f"{tool_result}\n\n[SELF-HEALING INSTRUCTION]: Operation returned an error. Inspect failure details above, perform root cause diagnosis, and apply a self-healing repair."
 
                     # Record tool output in history for the LLM to inspect
                     tool_msg: Dict[str, Any] = {

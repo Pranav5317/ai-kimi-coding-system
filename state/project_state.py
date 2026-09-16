@@ -278,8 +278,15 @@ class ProjectStateManager:
             found_entry_points: List[str] = []
             detected_deps: List[str] = []
 
-            manifest_names = {"package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "CMakeLists.txt", "Makefile"}
-            entry_names = {"main.py", "app.py", "server.js", "index.js", "App.tsx", "App.jsx", "main.cpp", "Main.java", "main.go", "main.rs", "index.html"}
+            manifest_names = {
+                "package.json", "requirements.txt", "pyproject.toml", "Cargo.toml", "go.mod", 
+                "pom.xml", "build.gradle", "CMakeLists.txt", "Makefile", "Dockerfile", 
+                "docker-compose.yml", "docker-compose.yaml", "setup.py", "Pipfile", "tsconfig.json"
+            }
+            entry_names = {
+                "main.py", "app.py", "server.js", "index.js", "server.ts", "index.ts", 
+                "App.tsx", "App.jsx", "main.cpp", "Main.java", "main.go", "main.rs", "index.html"
+            }
 
             import os
             for root, dirs, files in os.walk(str(ws_root)):
@@ -294,10 +301,15 @@ class ProjectStateManager:
                     rel_p = str(Path(root, f).relative_to(ws_root))
                     if f in manifest_names:
                         found_manifests.append(rel_p)
-                        # Read dependency hints
+                        # Read dependency and script hints
                         try:
                             content = (Path(root) / f).read_text(encoding="utf-8", errors="ignore").lower()
-                            for dep in ("fastapi", "flask", "django", "express", "react", "vue", "svelte", "next", "vite", "sqlite", "postgres", "mysql", "mongodb", "sqlalchemy", "torch", "tensorflow", "boost", "spring"):
+                            for dep in (
+                                "fastapi", "flask", "django", "express", "react", "vue", "svelte", 
+                                "next", "vite", "sqlite", "postgres", "mysql", "mongodb", "sqlalchemy", 
+                                "torch", "tensorflow", "boost", "spring", "docker", "prisma", "typeorm", 
+                                "sequelize", "alembic", "pytest", "jest", "vitest", "mocha", "pnpm", "yarn"
+                            ):
                                 if dep in content and dep not in detected_deps:
                                     detected_deps.append(dep)
                         except Exception:

@@ -322,6 +322,14 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
                     holder[0] = approved
                     evt.set()
 
+            elif msg_type == "cancel":
+                if core and core.agent5:
+                    core.agent5.stop_requested = True
+                await websocket.send_json({
+                    "type": "assistant_response",
+                    "content": "⏹️ Prompt generation cancelled by user."
+                })
+
             elif msg_type == "prompt":
                 prompt = data.get("content", "").strip()
                 require_perm = bool(data.get("require_permission", True))

@@ -61,6 +61,10 @@
       {
         "command": "multiAgent.restartServer",
         "title": "Multi-Agent: Restart Backend Server"
+      },
+      {
+        "command": "multiAgent.fixTerminalError",
+        "title": "Multi-Agent: Fix Error / Selection with Agent 5"
       }
     ],
     "configuration": {
@@ -107,6 +111,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start backend FastAPI server on extension launch."
+        },
+        "multiAgent.maxToolIterations": {
+          "type": "number",
+          "default": 25,
+          "description": "Maximum reasoning & tool execution iterations allowed per prompt (default 25)."
         },
         "multiAgent.requirePermission": {
           "type": "boolean",

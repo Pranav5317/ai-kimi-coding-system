@@ -131,15 +131,20 @@
     thinkingEl = null;
   }
 
+  let isGenerating = false;
+
   function setWorkingState(isWorking) {
+    isGenerating = isWorking;
     if (isWorking) {
-      sendBtn.disabled = true;
-      sendBtn.innerHTML = '<div class="btn-spinner"></div> <span>Reasoning...</span>';
+      sendBtn.disabled = false;
+      sendBtn.classList.add('stop-btn');
+      sendBtn.innerHTML = '<span>Stop</span> <span class="send-icon">🛑</span>';
       promptInput.disabled = true;
-      promptInput.placeholder = 'Agent 5 is working on your request...';
+      promptInput.placeholder = 'Agent 5 is working... Click Stop to cancel';
       showThinkingIndicator('Agent 5 is reasoning...');
     } else {
       sendBtn.disabled = false;
+      sendBtn.classList.remove('stop-btn');
       sendBtn.innerHTML = '<span>Send</span> <span class="send-icon">🚀</span>';
       promptInput.disabled = false;
       promptInput.placeholder = 'Ask Agent 5 to build, refactor, or test...';
@@ -351,7 +356,7 @@
     // Fenced code blocks ```lang ... ```
     text = text.replace(/```([a-zA-Z0-9_\-\+]*)\r?\n([\s\S]*?)\r?\n```/g, (match, lang, code) => {
       const language = lang ? lang.toLowerCase() : 'code';
-      return `<div class="code-block-wrapper"><div class="code-header"><span>${language}</span><button class="copy-btn">📋 Copy</button></div><pre><code class="language-${language}">${code}</code></pre></div>`;
+      return `<div class="code-block-wrapper"><div class="code-header"><span>${language}</span><div class="code-header-actions"><button class="apply-code-btn" title="Apply code directly to VS Code active editor document">⚡ Apply to Editor</button><button class="copy-btn">📋 Copy</button></div></div><pre><code class="language-${language}">${code}</code></pre></div>`;
     });
 
     // Inline code `code`
@@ -464,6 +469,15 @@
   }
 
   function sendPrompt() {
+    if (isGenerating) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'cancel' }));
+      }
+      setWorkingState(false);
+      appendSystemMessage('⏹️ Prompt generation cancelled by user.');
+      return;
+    }
+
     const prompt = promptInput.value.trim();
     if (!prompt) return;
 
@@ -677,6 +691,21 @@
       return;
     }
 
+    const applyCodeBtn = e.target.closest('.apply-code-btn');
+    if (applyCodeBtn) {
+      e.preventDefault();
+      const wrapper = applyCodeBtn.closest('.code-block-wrapper');
+      if (wrapper) {
+        const codeEl = wrapper.querySelector('code');
+        if (codeEl) {
+          vscode.postMessage({ command: 'applyCode', code: codeEl.textContent || '' });
+          applyCodeBtn.textContent = '⚡ Applied!';
+          setTimeout(() => { applyCodeBtn.textContent = '⚡ Apply to Editor'; }, 2000);
+        }
+      }
+      return;
+    }
+
     const fileTarget = e.target.closest('.file-link');
     if (fileTarget) {
       e.preventDefault();
@@ -702,9 +731,107 @@
     }
   });
 
+  // Popovers for @ Mentions and / Slash Commands
+  let mentionPopupEl = null;
+  let slashPopupEl = null;
+
+  function removePopups() {
+    if (mentionPopupEl) {
+      mentionPopupEl.remove();
+      mentionPopupEl = null;
+    }
+    if (slashPopupEl) {
+      slashPopupEl.remove();
+      slashPopupEl = null;
+    }
+  }
+
+  function showSlashPopup() {
+    removePopups();
+    slashPopupEl = document.createElement('div');
+    slashPopupEl.className = 'autocomplete-popup slash-popup';
+
+    const commands = [
+      { cmd: '/plan', label: '/plan', desc: 'Draft technical architecture implementation plan' },
+      { cmd: '/test', label: '/test', desc: 'Generate comprehensive Pytest/Jest unit test suite' },
+      { cmd: '/fix', label: '/fix', desc: 'Analyze and fix bug or runtime stack trace' },
+      { cmd: '/refactor', label: '/refactor', desc: 'Refactor and optimize code structure' }
+    ];
+
+    commands.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'popup-item';
+      item.innerHTML = `<span class="popup-title">${c.label}</span><span class="popup-desc">${c.desc}</span>`;
+      item.addEventListener('click', () => {
+        if (c.cmd === '/plan') promptInput.value = 'Plan implementation for: ';
+        else if (c.cmd === '/test') promptInput.value = 'Generate unit tests for: ';
+        else if (c.cmd === '/fix') promptInput.value = 'Analyze and fix error in: ';
+        else if (c.cmd === '/refactor') promptInput.value = 'Refactor and optimize: ';
+        removePopups();
+        promptInput.focus();
+      });
+      slashPopupEl.appendChild(item);
+    });
+
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.insertBefore(slashPopupEl, promptInput);
+    }
+  }
+
+  function showMentionPopup(files) {
+    removePopups();
+    mentionPopupEl = document.createElement('div');
+    mentionPopupEl.className = 'autocomplete-popup mention-popup';
+
+    const header = document.createElement('div');
+    header.className = 'popup-header';
+    header.textContent = '🏷️ Attach Workspace Context (@File)';
+    mentionPopupEl.appendChild(header);
+
+    const itemList = files && files.length > 0 ? files.slice(0, 8) : ['PROJECT_STATE.md', 'server.py', 'README.md'];
+    itemList.forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'popup-item';
+      item.innerHTML = `<span class="popup-icon">📄</span><span class="popup-title">@file:${f}</span>`;
+      item.addEventListener('click', () => {
+        promptInput.value = promptInput.value.replace(/@[a-zA-Z0-9_\-\.\/]*$/, `@file:${f} `);
+        removePopups();
+        promptInput.focus();
+      });
+      mentionPopupEl.appendChild(item);
+    });
+
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.insertBefore(mentionPopupEl, promptInput);
+    }
+  }
+
+  promptInput.addEventListener('input', () => {
+    const val = promptInput.value;
+    if (val === '/') {
+      showSlashPopup();
+    } else if (val.endsWith('@')) {
+      vscode.postMessage({ command: 'getWorkspaceFiles' });
+    } else if (!val.includes('@') && !val.startsWith('/')) {
+      removePopups();
+    }
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (msg && msg.command === 'workspaceFiles') {
+      showMentionPopup(msg.files || []);
+    }
+  });
+
   sendBtn.addEventListener('click', sendPrompt);
   promptInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Escape') {
+      removePopups();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      removePopups();
       e.preventDefault();
       sendPrompt();
     }
