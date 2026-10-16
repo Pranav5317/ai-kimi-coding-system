@@ -24,6 +24,19 @@
     });
   }
 
+  const settingsBtn = document.getElementById('settings-btn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'openSettings' });
+    });
+  }
+
+  if (modelBadge) {
+    modelBadge.addEventListener('click', () => {
+      vscode.postMessage({ command: 'openSettings' });
+    });
+  }
+
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -188,14 +201,23 @@
               appendAssistantMessage(item.content);
             }
           } else if (item.role === 'tool') {
-            appendToolExecution(item.name || 'tool', {}, item.content || '');
+            appendToolExecution(item.name || 'tool', item.args || {}, item.content || '');
+          } else if (item.role === 'system' && item.content && item.content.includes('AUTO-ACTIVATED SKILL')) {
+            const match = item.content.match(/AUTO-ACTIVATED SKILL:\s*([A-Z0-9_\-]+)/i);
+            const skillName = match ? match[1].toLowerCase() : 'skill';
+            appendToolExecution('apply_skill', { skill_name: skillName }, item.content);
           }
         });
       } else {
         chatHistory.innerHTML = '';
         appendSystemMessage('New project chat session initialized.');
       }
-      setWorkingState(false);
+      if (!isGenerating) {
+        setWorkingState(false);
+      }
+    } else if (data.type === 'is_working') {
+      setWorkingState(true);
+      updateThinkingIndicator(data.content || 'Agent 5 is working in background...');
     } else if (data.type === 'status') {
       updateThinkingIndicator(data.content);
     } else if (data.type === 'tool_execution') {
@@ -417,6 +439,7 @@
   }
 
   function appendAssistantMessage(text) {
+    if (!text || !String(text).trim()) return;
     const div = document.createElement('div');
     div.className = 'msg assistant';
     div.innerHTML = parseMarkdown(text);
@@ -437,28 +460,57 @@
     const card = document.createElement('div');
     card.className = 'tool-card';
 
-    const icon = getToolIcon(tool);
-    let displayName = tool;
+    const rawTool = String(tool || 'tool');
+    const icon = getToolIcon(rawTool);
+    let displayName = rawTool;
     let badgeText = 'Success';
-    if (tool === 'apply_skill' && args && args.skill_name) {
-      displayName = `Auto-Activated Skill: ${args.skill_name}`;
-      badgeText = 'Skill Active';
+
+    // Normalize args if passed as JSON string
+    let parsedArgs = args;
+    if (typeof args === 'string') {
+      try { parsedArgs = JSON.parse(args); } catch (e) { parsedArgs = {}; }
+    }
+    if (!parsedArgs || typeof parsedArgs !== 'object') {
+      parsedArgs = {};
     }
 
-    const argsStr = args && Object.keys(args).length > 0 ? JSON.stringify(args) : '';
     const safeResult = String(result || '');
+
+    // Handle skill activation formatting
+    if (rawTool === 'apply_skill' || rawTool.includes('skill')) {
+      let skillName = parsedArgs.skill_name || parsedArgs.skill || '';
+      if (!skillName && safeResult) {
+        const match = safeResult.match(/\[AUTO-ACTIVATED SKILL:\s*([A-Z0-9_\-]+)\]/i) || safeResult.match(/SKILL:\s*([A-Z0-9_\-]+)/i);
+        if (match) skillName = match[1].toLowerCase();
+      }
+      displayName = skillName ? `Auto-Activated Skill: ${skillName}` : 'Auto-Activated Skill';
+      badgeText = 'Skill Active';
+    } else {
+      const targetDetail = parsedArgs.path || parsedArgs.file || parsedArgs.command || parsedArgs.target_agent;
+      if (targetDetail) {
+        const shortTarget = String(targetDetail).length > 35 ? String(targetDetail).slice(0, 32) + '...' : String(targetDetail);
+        displayName = `${rawTool} (${shortTarget})`;
+      }
+    }
+
+    if (safeResult.includes('Error') || safeResult.includes('FAILED') || safeResult.includes('DENIED')) {
+      badgeText = 'Failed';
+    }
+
+    const badgeClass = badgeText === 'Failed' ? 'error' : 'success';
+    const argsStr = Object.keys(parsedArgs).length > 0 ? JSON.stringify(parsedArgs, null, 2) : '';
 
     card.innerHTML = `
       <div class="tool-card-header">
         <div class="tool-info">
           <span class="tool-icon">${icon}</span>
           <span class="tool-name">${displayName}</span>
-          <span class="tool-status-badge success">${badgeText}</span>
+          <span class="tool-status-badge ${badgeClass}">${badgeText}</span>
         </div>
         <span class="tool-toggle-arrow">►</span>
       </div>
       <div class="tool-card-body">
-        <strong>Arguments:</strong>\n${argsStr || '(none)'}\n\n<strong>Output:</strong>\n${safeResult}
+        <strong>Arguments:</strong>\n${argsStr || '(none)'}\n\n<strong>Output:</strong>\n${safeResult || '(no output)'}
       </div>
     `;
 
@@ -575,8 +627,10 @@
           title.textContent = `[${agent.agent_id}] ${agent.role}`;
           
           const badge = document.createElement('span');
-          badge.className = 'cap-badge';
-          badge.textContent = 'Active';
+          badge.className = 'cap-badge model-pill-badge';
+          const providerStr = agent.provider ? agent.provider.toUpperCase() : 'LLM';
+          const modelStr = agent.model ? agent.model : 'default';
+          badge.textContent = `🤖 ${providerStr}: ${modelStr}`;
           
           header.appendChild(title);
           header.appendChild(badge);

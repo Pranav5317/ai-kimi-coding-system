@@ -187,6 +187,23 @@ class BackendAgent(BaseAgent):
         except Exception as e:
             return f"Tool execution error in '{function_name}': {e}"
 
+    def _auto_write_files_to_sandbox(self, text: str) -> None:
+        """Extracts Python code blocks from text and saves them to sandbox backend files."""
+        if not self.sandbox or not text:
+            return
+
+        import re
+        py_match = re.search(r'```python\r?\n([\s\S]*?)\r?\n```', text, re.IGNORECASE)
+        if py_match:
+            py_code = py_match.group(1).strip()
+            try:
+                self.sandbox.create_file("backend/app.py", py_code)
+                self.sandbox.create_file("app.py", py_code)
+                if self.diary:
+                    self.diary.record("AUTO_CREATE_FILE", "backend/app.py", "SUCCESS", "Saved backend Python code to workspace")
+            except Exception:
+                pass
+
     def process_request(
         self,
         prompt: str,
@@ -207,6 +224,7 @@ class BackendAgent(BaseAgent):
                 response_text = raw_response.get("content", "").strip()
             else:
                 response_text = str(raw_response).strip()
+            self._auto_write_files_to_sandbox(response_text)
             self.add_message("assistant", response_text)
             return response_text
 
@@ -232,6 +250,7 @@ class BackendAgent(BaseAgent):
             # If no tool calls at all, finalize
             if not tool_calls:
                 final_text = (raw_content or "").strip()
+                self._auto_write_files_to_sandbox(final_text)
                 self.add_message("assistant", final_text)
                 return final_text
 

@@ -382,69 +382,72 @@ body {
 /* Tool Action Cards */
 .tool-card {
   margin: 6px 0;
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.2));
+  background: var(--card-bg, #1e1e24);
   border-radius: 6px;
   overflow: hidden;
   transition: border-color 0.2s ease;
+  min-height: 32px;
 }
 
 .tool-card:hover {
-  border-color: var(--accent-color);
+  border-color: var(--accent-color, #38bdf8);
 }
 
 .tool-card-header {
-  padding: 6px 10px;
+  padding: 8px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.05);
+  min-height: 32px;
 }
 
 .tool-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  color: var(--fg-color);
+  font-family: var(--vscode-editor-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  color: #f4f4f5 !important;
 }
 
 .tool-icon {
   font-size: 13px;
+  line-height: 1;
 }
 
 .tool-name {
   font-weight: 700;
-  color: var(--accent-color);
+  color: #38bdf8 !important;
 }
 
 .tool-status-badge {
   font-size: 9px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: 3px;
   text-transform: uppercase;
   font-weight: bold;
+  letter-spacing: 0.3px;
 }
 
 .tool-status-badge.success {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80 !important;
+  border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
 .tool-status-badge.error {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
 .tool-toggle-arrow {
   font-size: 10px;
-  color: var(--fg-color);
-  opacity: 0.6;
+  color: #a1a1aa !important;
   transition: transform 0.2s ease;
 }
 

@@ -393,6 +393,27 @@ class WorkspaceAgent(BaseAgent):
                 )
 
             resp_snippet = str(response.content)
+
+            # Auto-save any HTML/CSS/JS/Python code returned by delegated agent
+            if self.sandbox and resp_snippet:
+                import re
+                if "<!DOCTYPE html>" in resp_snippet or "<html" in resp_snippet or "```html" in resp_snippet:
+                    h_match = re.search(r'```html\r?\n([\s\S]*?)\r?\n```', resp_snippet, re.IGNORECASE)
+                    h_code = h_match.group(1).strip() if h_match else None
+                    if not h_code:
+                        h_start = resp_snippet.find("<!DOCTYPE html>") if "<!DOCTYPE html>" in resp_snippet else resp_snippet.find("<html")
+                        h_end = resp_snippet.rfind("</html>")
+                        if h_start != -1 and h_end != -1 and h_end > h_start:
+                            h_code = resp_snippet[h_start:h_end + 7].strip()
+                    if h_code:
+                        self.sandbox.create_file("index.html", h_code)
+                        self.sandbox.create_file("frontend/index.html", h_code)
+
+                if "```python" in resp_snippet or "from fastapi import" in resp_snippet or "import FastAPI" in resp_snippet:
+                    p_match = re.search(r'```python\r?\n([\s\S]*?)\r?\n```', resp_snippet, re.IGNORECASE)
+                    if p_match:
+                        self.sandbox.create_file("backend/app.py", p_match.group(1).strip())
+
             if len(resp_snippet) > 1000:
                 resp_snippet = resp_snippet[:1000] + "\n... [response truncated for context memory optimization]"
 
@@ -599,12 +620,13 @@ class WorkspaceAgent(BaseAgent):
         calls = []
 
         # 2. Extract pseudo-XML tool call tags: <function=tool_name> <parameter=key>value</parameter> </function>
-        func_matches = list(re.finditer(r'<function=([a-zA-Z0-9_\-]+)>(.*?)(?:</function>|$)', cleaned, re.DOTALL))
+        # Supports both raw tags (<function=...>) and HTML escaped tags (&lt;function=...&gt;)
+        func_matches = list(re.finditer(r'(?:<|&lt;)function=([a-zA-Z0-9_\-]+)(?:>|&gt;)(.*?)(?:(?:<|&lt;)/function(?:>|&gt;)|$)', cleaned, re.DOTALL))
         for f_match in func_matches:
             tool_name = f_match.group(1).strip()
             body = f_match.group(2)
             args: Dict[str, Any] = {}
-            param_matches = re.finditer(r'<parameter=([a-zA-Z0-9_\-]+)>\s*(.*?)\s*</parameter>', body, re.DOTALL)
+            param_matches = re.finditer(r'(?:<|&lt;)parameter=([a-zA-Z0-9_\-]+)(?:>|&gt;)\s*(.*?)\s*(?:(?:<|&lt;)/parameter(?:>|&gt;)|$)', body, re.DOTALL)
             for p_match in param_matches:
                 p_name = p_match.group(1).strip()
                 p_val = p_match.group(2)
@@ -790,7 +812,9 @@ class WorkspaceAgent(BaseAgent):
                 on_tool_call("apply_skill", {"skill_name": skill.name}, skill_result)
 
             self.history.append({
-                "role": "system",
+                "role": "tool",
+                "name": "apply_skill",
+                "args": {"skill_name": skill.name},
                 "content": f"⚡ [AUTO-ACTIVATED SKILL: {skill.name.upper()}]\n{skill_result}"
             })
             self.save_history_to_disk()
@@ -867,7 +891,8 @@ class WorkspaceAgent(BaseAgent):
                     tool_msg: Dict[str, Any] = {
                         "role": "tool",
                         "content": tool_result,
-                        "name": fn_name
+                        "name": fn_name,
+                        "args": parsed_args
                     }
                     if "id" in call:
                         tool_msg["tool_call_id"] = call["id"]
@@ -881,6 +906,33 @@ class WorkspaceAgent(BaseAgent):
             else:
                 # Final text answer reached
                 final_content = raw_content.strip()
+                if not final_content and iteration == 1:
+                    # Model returned empty text on first attempt - prompt for tool execution or response
+                    self.history.append({"role": "user", "content": "[SYSTEM INSTRUCTION]: Your previous response was empty. Please execute the required tool (e.g. edit_file, create_file, run_command) or provide a detailed text response to fulfill the user's request."})
+                    continue
+
+                # Check if model promised a tool action without executing it
+                lower_raw = raw_content.lower().strip()
+                unfulfilled_promise = any(
+                    lower_raw.endswith(p) for p in (
+                        "let me update", "let me fix", "let me create", "let me edit",
+                        "let me run", "let me apply", "let me start", "let me write",
+                        "let me check", "let me inspect", "updating the", "creating the",
+                        "javascript file:", "html file:", "code:"
+                    )
+                ) or (lower_raw.endswith(":") and "let me" in lower_raw[-120:])
+
+                if unfulfilled_promise and iteration < self.max_tool_iterations:
+                    self.history.append({"role": "assistant", "content": raw_content})
+                    self.history.append({
+                        "role": "user",
+                        "content": "[SYSTEM DIRECTIVE]: You stated that you would perform an update/file operation, but no tool call was attached. Execute the required tool call (e.g., create_file, edit_file, run_command, list_files) immediately to complete the action."
+                    })
+                    continue
+
+                if not final_content:
+                    final_content = "I acknowledge your instruction. Let me know which specific file or task you would like me to work on, or I can inspect the workspace structure."
+
                 changes_summary = self.sandbox.generate_changes_summary()
                 if changes_summary:
                     final_content = f"{final_content}\n{changes_summary}"

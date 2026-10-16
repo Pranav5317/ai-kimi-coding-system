@@ -28,8 +28,42 @@ class AppConfig:
     workspace_dir: Optional[Path] = None
     diary_file: Optional[Path] = None
     agent5_system_prompt: Optional[str] = None
+    agent1_llm_provider: Optional[str] = None
+    agent1_llm_model: Optional[str] = None
+    agent2_llm_provider: Optional[str] = None
+    agent2_llm_model: Optional[str] = None
+    agent3_llm_provider: Optional[str] = None
+    agent3_llm_model: Optional[str] = None
+    agent4_llm_provider: Optional[str] = None
+    agent4_llm_model: Optional[str] = None
+    agent5_llm_provider: Optional[str] = None
+    agent5_llm_model: Optional[str] = None
 
     def __post_init__(self):
+        if self.agent1_llm_provider is None:
+            self.agent1_llm_provider = os.getenv("AGENT1_LLM_PROVIDER")
+        if self.agent1_llm_model is None:
+            self.agent1_llm_model = os.getenv("AGENT1_LLM_MODEL")
+
+        if self.agent2_llm_provider is None:
+            self.agent2_llm_provider = os.getenv("AGENT2_LLM_PROVIDER")
+        if self.agent2_llm_model is None:
+            self.agent2_llm_model = os.getenv("AGENT2_LLM_MODEL")
+
+        if self.agent3_llm_provider is None:
+            self.agent3_llm_provider = os.getenv("AGENT3_LLM_PROVIDER")
+        if self.agent3_llm_model is None:
+            self.agent3_llm_model = os.getenv("AGENT3_LLM_MODEL")
+
+        if self.agent4_llm_provider is None:
+            self.agent4_llm_provider = os.getenv("AGENT4_LLM_PROVIDER")
+        if self.agent4_llm_model is None:
+            self.agent4_llm_model = os.getenv("AGENT4_LLM_MODEL")
+
+        if self.agent5_llm_provider is None:
+            self.agent5_llm_provider = os.getenv("AGENT5_LLM_PROVIDER")
+        if self.agent5_llm_model is None:
+            self.agent5_llm_model = os.getenv("AGENT5_LLM_MODEL")
         if self.llm_provider is None:
             self.llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
         if self.api_key is None:

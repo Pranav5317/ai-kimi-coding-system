@@ -27,6 +27,14 @@ class OllamaProvider(BaseLLMProvider):
         self.chat_endpoint = f"{self.base_url}/api/chat"
         self.tags_endpoint = f"{self.base_url}/api/tags"
 
+    @property
+    def provider_name(self) -> str:
+        return "ollama"
+
+    @property
+    def model_name(self) -> str:
+        return self.model
+
     def health_check(self) -> Tuple[bool, str]:
         """
         Verifies if Ollama is running and whether the specified model is installed.
@@ -65,6 +73,25 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             return False, f"Unexpected error while checking Ollama health: {str(e)}"
 
+    @staticmethod
+    def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Sanitizes pseudo-XML tags (<parameter...>, </parameter>, <function...>, </function>) in message content
+        to prevent Ollama's Go XML tool parser from throwing 500 XML syntax errors.
+        """
+        sanitized = []
+        for msg in messages:
+            msg_copy = dict(msg)
+            content = msg_copy.get("content")
+            if isinstance(content, str) and content:
+                content = content.replace("<parameter", "&lt;parameter")
+                content = content.replace("</parameter>", "&lt;/parameter&gt;")
+                content = content.replace("<function", "&lt;function")
+                content = content.replace("</function>", "&lt;/function&gt;")
+                msg_copy["content"] = content
+            sanitized.append(msg_copy)
+        return sanitized
+
     def chat(
         self,
         messages: List[Dict[str, Any]],
@@ -73,10 +100,12 @@ class OllamaProvider(BaseLLMProvider):
     ) -> Dict[str, Any]:
         """
         Sends chat request to Ollama with optional tool definitions and returns the model message object.
+        Supports automatic retry if Ollama's local runner is cold-starting or recovering from a 500 error.
         """
+        clean_messages = self._sanitize_messages(messages)
         payload = {
             "model": kwargs.get("model", self.model),
-            "messages": messages,
+            "messages": clean_messages,
             "stream": False,
             "options": {
                 "temperature": kwargs.get("temperature", self.default_temperature),
@@ -87,37 +116,57 @@ class OllamaProvider(BaseLLMProvider):
             payload["tools"] = tools
 
         req_timeout = kwargs.get("timeout", self.timeout)
+        max_retries = kwargs.get("max_retries", 3)
 
-        try:
-            response = requests.post(self.chat_endpoint, json=payload, timeout=req_timeout)
-            response.raise_for_status()
-            data = response.json()
-            msg = data.get("message", {})
-            return {
-                "role": msg.get("role", "assistant"),
-                "content": msg.get("content", ""),
-                "tool_calls": msg.get("tool_calls", None)
-            }
-        except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
-            raise TimeoutError(
-                f"Local Ollama model '{self.model}' timed out after {req_timeout}s. "
-                "Your local GPU/CPU might be overloaded, un-loading VRAM, or processing a very large prompt context. "
-                "Please retry your query or check your local Ollama status ('ollama ps')."
-            )
-        except requests.exceptions.ConnectionError:
-            raise ConnectionError(f"Failed to reach Ollama at {self.chat_endpoint}. Is Ollama running?")
-        except requests.exceptions.HTTPError as e:
-            raise RuntimeError(f"Ollama API error: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to generate response: {str(e)}")
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(self.chat_endpoint, json=payload, timeout=req_timeout)
+                response.raise_for_status()
+                data = response.json()
+                msg = data.get("message", {})
+                return {
+                    "role": msg.get("role", "assistant"),
+                    "content": msg.get("content", ""),
+                    "tool_calls": msg.get("tool_calls", None)
+                }
+            except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2.0)
+                    continue
+                raise TimeoutError(
+                    f"Local Ollama model '{self.model}' timed out after {req_timeout}s. "
+                    "Your local GPU/CPU might be overloaded, un-loading VRAM, or processing a very large prompt context. "
+                    "Please retry your query or check your local Ollama status ('ollama ps')."
+                )
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2.0)
+                    continue
+                raise ConnectionError(f"Failed to reach Ollama at {self.chat_endpoint}. Is Ollama running?")
+            except requests.exceptions.HTTPError as e:
+                # Handle Ollama 500 internal runner / tokenize cold-start errors automatically
+                if e.response.status_code == 500 and attempt < max_retries:
+                    import time
+                    time.sleep(2.0)
+                    continue
+                raise RuntimeError(f"Ollama API error: {e.response.status_code} - {e.response.text}")
+            except Exception as e:
+                if attempt < max_retries:
+                    import time
+                    time.sleep(1.0)
+                    continue
+                raise RuntimeError(f"Failed to generate response: {str(e)}")
 
     def chat_stream(self, messages: List[Dict[str, Any]], **kwargs: Any) -> Generator[str, None, None]:
         """
         Streams response tokens directly from Ollama as newline-delimited JSON.
         """
+        clean_messages = self._sanitize_messages(messages)
         payload = {
             "model": kwargs.get("model", self.model),
-            "messages": messages,
+            "messages": clean_messages,
             "stream": True,
             "options": {
                 "temperature": kwargs.get("temperature", self.default_temperature),

@@ -233,6 +233,7 @@ class MultiAgentChatViewProvider {
             enableScripts: true,
             localResourceRoots: [this._context.extensionUri]
         };
+        webviewView.retainContextWhenHidden = true;
         webviewView.webview.onDidReceiveMessage(async (message) => {
             if (!message)
                 return;
@@ -271,6 +272,9 @@ class MultiAgentChatViewProvider {
                 else {
                     vscode.window.showErrorMessage('No active text editor found to apply code.');
                 }
+            }
+            else if (message.command === 'openSettings') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'multiAgent');
             }
             else if (message.command === 'getWorkspaceFiles') {
                 try {
@@ -321,11 +325,12 @@ class MultiAgentChatViewProvider {
             </div>
             <div class="header-badges">
                 <label class="toggle-control" title="Ask permission before file modifications and running commands">
-                    <input type="checkbox" id="require-perm-toggle" checked />
+                    <input type="checkbox" id="require-perm-toggle" />
                     <span class="toggle-slider"></span>
                     <span class="toggle-label">Ask Permission</span>
                 </label>
-                <span class="badge model-badge" id="model-badge">qwen3-coder</span>
+                <span class="badge model-badge" id="model-badge" title="Click to change LLM model & provider settings">qwen3-coder</span>
+                <button class="icon-btn settings-btn" id="settings-btn" title="Configure LLM Provider, Model & API Keys">⚙️</button>
             </div>
         </div>
         <div class="header-workspace" id="workspace-badge" title="Active workspace path">

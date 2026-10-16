@@ -47,7 +47,9 @@ class FrontendAgent(BaseAgent):
         role: str = "frontend_developer",
         system_prompt: Optional[str] = None,
         capabilities: Optional[Union[Set[str], list]] = None,
-        orchestrator: Optional[Any] = None
+        orchestrator: Optional[Any] = None,
+        sandbox: Optional[Any] = None,
+        diary: Optional[Any] = None
     ) -> None:
         super().__init__(
             name=name,
@@ -58,10 +60,61 @@ class FrontendAgent(BaseAgent):
         self.agent_id = agent_id
         self.capabilities = set(capabilities) if capabilities is not None else set(DEFAULT_FRONTEND_CAPABILITIES)
         self.orchestrator = orchestrator
+        self.sandbox = sandbox
+        self.diary = diary
 
     def has_capability(self, capability: str) -> bool:
         """Checks if FrontendAgent possesses the given capability token."""
         return capability in self.capabilities
+
+    def _auto_write_files_to_sandbox(self, text: str) -> None:
+        """Extracts code blocks or HTML/CSS/JS from text and saves them to sandbox files."""
+        if not self.sandbox or not text:
+            return
+
+        import re
+        # 1. Check for HTML code
+        html_match = re.search(r'```html\r?\n([\s\S]*?)\r?\n```', text, re.IGNORECASE)
+        html_code = html_match.group(1).strip() if html_match else None
+        if not html_code and ("<!DOCTYPE html>" in text or "<html" in text):
+            # Extract raw html block
+            h_start = text.find("<!DOCTYPE html>") if "<!DOCTYPE html>" in text else text.find("<html")
+            h_end = text.rfind("</html>")
+            if h_start != -1 and h_end != -1 and h_end > h_start:
+                html_code = text[h_start:h_end + 7].strip()
+
+        if html_code:
+            try:
+                self.sandbox.create_file("index.html", html_code)
+                self.sandbox.create_file("frontend/index.html", html_code)
+                if self.diary:
+                    self.diary.record("AUTO_CREATE_FILE", "index.html", "SUCCESS", "Saved frontend HTML to workspace")
+            except Exception:
+                pass
+
+        # 2. Check for CSS code
+        css_match = re.search(r'```css\r?\n([\s\S]*?)\r?\n```', text, re.IGNORECASE)
+        if css_match:
+            css_code = css_match.group(1).strip()
+            try:
+                self.sandbox.create_file("frontend/styles.css", css_code)
+                self.sandbox.create_file("styles.css", css_code)
+                if self.diary:
+                    self.diary.record("AUTO_CREATE_FILE", "styles.css", "SUCCESS", "Saved frontend CSS to workspace")
+            except Exception:
+                pass
+
+        # 3. Check for JS code
+        js_match = re.search(r'```(?:js|javascript)\r?\n([\s\S]*?)\r?\n```', text, re.IGNORECASE)
+        if js_match:
+            js_code = js_match.group(1).strip()
+            try:
+                self.sandbox.create_file("frontend/app.js", js_code)
+                self.sandbox.create_file("app.js", js_code)
+                if self.diary:
+                    self.diary.record("AUTO_CREATE_FILE", "app.js", "SUCCESS", "Saved frontend JS to workspace")
+            except Exception:
+                pass
 
     def process_request(self, prompt: str) -> str:
         """
@@ -81,6 +134,7 @@ class FrontendAgent(BaseAgent):
         else:
             response_text = str(raw_response).strip()
 
+        self._auto_write_files_to_sandbox(response_text)
         self.add_message("assistant", response_text)
         return response_text
 

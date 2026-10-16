@@ -125,6 +125,31 @@
           "type": "boolean",
           "default": true,
           "description": "Require human-in-the-loop approval before executing file writes or system commands."
+        },
+        "multiAgent.agent1Model": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM model for Agent 1 (Frontend Developer). Leave empty to use global default model."
+        },
+        "multiAgent.agent2Model": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM model for Agent 2 (Backend Developer). Leave empty to use global default model."
+        },
+        "multiAgent.agent3Model": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM model for Agent 3 (Data Manager). Leave empty to use global default model."
+        },
+        "multiAgent.agent4Model": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM model for Agent 4 (Supervisor/QA). Leave empty to use global default model."
+        },
+        "multiAgent.agent5Model": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM model for Agent 5 (Workspace Manager & Planner). Leave empty to use global default model."
         }
       }
     }

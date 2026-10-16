@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from config import config
-from llm import get_llm_provider, OllamaProvider
+from llm import get_llm_provider, OllamaProvider, LLMRouter
 from tools import WorkspaceSandbox, DevServerManager
 from state import ProjectStateManager
 from diary import CodeDiary
@@ -62,6 +62,7 @@ class SystemCore:
             config.set_workspace(workspace_path)
 
         self.llm = get_llm_provider()
+        self.router = LLMRouter(default_provider=self.llm)
         self.diary = CodeDiary(config.diary_file)
         self.sandbox = WorkspaceSandbox(config.workspace_dir, diary=self.diary)
         self.server_manager = DevServerManager(workspace_root=config.workspace_dir, diary=self.diary)
@@ -69,13 +70,13 @@ class SystemCore:
         self.state_manager.onboard_existing_project()
         self.orchestrator = Orchestrator()
 
-        # Agents
-        self.agent1 = FrontendAgent(llm_provider=self.llm, agent_id="agent1", orchestrator=self.orchestrator)
-        self.agent2 = BackendAgent(llm_provider=self.llm, agent_id="agent2", orchestrator=self.orchestrator, sandbox=self.sandbox, diary=self.diary)
-        self.agent3 = DataManagerAgent(llm_provider=self.llm, agent_id="agent3", orchestrator=self.orchestrator)
-        self.agent4 = SupervisorAgent(llm_provider=self.llm, agent_id="agent4", orchestrator=self.orchestrator)
+        # Instantiate agents with custom or fallback LLM providers via LLMRouter
+        self.agent1 = FrontendAgent(llm_provider=self.router.get_agent_llm("agent1"), agent_id="agent1", orchestrator=self.orchestrator, sandbox=self.sandbox, diary=self.diary)
+        self.agent2 = BackendAgent(llm_provider=self.router.get_agent_llm("agent2"), agent_id="agent2", orchestrator=self.orchestrator, sandbox=self.sandbox, diary=self.diary)
+        self.agent3 = DataManagerAgent(llm_provider=self.router.get_agent_llm("agent3"), agent_id="agent3", orchestrator=self.orchestrator)
+        self.agent4 = SupervisorAgent(llm_provider=self.router.get_agent_llm("agent4"), agent_id="agent4", orchestrator=self.orchestrator)
         self.agent5 = WorkspaceAgent(
-            llm_provider=self.llm,
+            llm_provider=self.router.get_agent_llm("agent5"),
             agent_id="agent5",
             name="Agent 5 (Workspace Manager)",
             role="workspace_manager",
@@ -87,7 +88,8 @@ class SystemCore:
             orchestrator=self.orchestrator
         )
 
-        # Register agents
+        # State flags
+        self.is_processing: bool = False
         for agent in (self.agent1, self.agent2, self.agent3, self.agent4, self.agent5):
             self.orchestrator.register_agent(
                 agent_id=agent.agent_id,
@@ -131,6 +133,48 @@ class SystemCore:
 core: Optional[SystemCore] = None
 
 
+@app.get("/", response_class=HTMLResponse)
+def root_index():
+    ws_dir = config.workspace_dir
+    # Serve generated frontend index.html from workspace if present
+    for candidate in [ws_dir / "index.html", ws_dir / "frontend" / "index.html", ws_dir / "public" / "index.html"]:
+        if candidate.exists() and candidate.is_file():
+            return HTMLResponse(content=candidate.read_text(encoding="utf-8"))
+
+    # Status page fallback if workspace index.html is not created yet
+    return HTMLResponse(content=f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Multi-Agent System - Project Workspace Server</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #18181b; color: #f4f4f5; margin: 0; padding: 40px; display: flex; align-items: center; justify-content: center; height: 100vh; box-sizing: border-box; }}
+            .card {{ background: #27272a; border: 1px solid #3f3f46; border-radius: 12px; padding: 32px; max-width: 600px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
+            h1 {{ color: #38bdf8; margin-top: 0; font-size: 22px; display: flex; align-items: center; gap: 10px; }}
+            p {{ color: #a1a1aa; line-height: 1.6; font-size: 14px; }}
+            .status-badge {{ background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); padding: 4px 10px; border-radius: 16px; font-size: 11px; font-weight: bold; text-transform: uppercase; }}
+            .path-box {{ background: #18181b; padding: 10px 14px; border-radius: 6px; font-family: monospace; color: #38bdf8; font-size: 12px; word-break: break-all; margin: 16px 0; border: 1px solid #3f3f46; }}
+            .actions {{ margin-top: 24px; display: flex; gap: 12px; }}
+            .btn {{ background: #0284c7; color: white; border: none; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; cursor: pointer; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🤖 Multi-Agent Workspace Server <span class="status-badge">Online</span></h1>
+            <p>The backend server daemon is active and managing your multi-agent workspace.</p>
+            <p><strong>Current Workspace Path:</strong></p>
+            <div class="path-box">{ws_dir}</div>
+            <p>Once your agent team creates <code>index.html</code> (or <code>frontend/index.html</code>) in this workspace, refreshing this page will immediately load your full web application here.</p>
+            <div class="actions">
+                <a class="btn" href="/api/health" target="_blank">Health Status</a>
+                <a class="btn" style="background: #374151" href="/api/state" target="_blank">View Project State</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+
 @app.get("/api/health")
 def get_health():
     if core is None:
@@ -150,9 +194,12 @@ def list_agents():
         raise HTTPException(status_code=500, detail="Core not initialized.")
     agents = []
     for reg in core.orchestrator.registry.list_agents():
+        p_name, m_name = core.router.get_agent_model_info(reg.agent_id)
         agents.append({
             "agent_id": reg.agent_id,
             "role": reg.role,
+            "provider": p_name,
+            "model": m_name,
             "capabilities": sorted(list(reg.capabilities)) if reg.capabilities else []
         })
     return {"agents": agents}
@@ -304,6 +351,16 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
             "type": "history",
             "history": core.agent5.get_history()
         })
+        if core.is_processing:
+            await websocket.send_json({
+                "type": "is_working",
+                "working": True,
+                "content": "Agent 5 is currently processing in the background..."
+            })
+            # Re-emit any active permission approval cards to newly connected socket
+            if hasattr(core, "active_perm_requests"):
+                for req in core.active_perm_requests.values():
+                    await websocket.send_json(req)
 
     request_lock = asyncio.Lock()
 
@@ -365,7 +422,16 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
                     continue
 
                 async with request_lock:
-                    await websocket.send_json({"type": "status", "content": "Agent 5 reasoning..."})
+                    if core:
+                        core.is_processing = True
+
+                    async def safe_send(msg: dict):
+                        try:
+                            await ws_manager.broadcast(msg)
+                        except Exception:
+                            pass
+
+                    await safe_send({"type": "status", "content": "Agent 5 reasoning..."})
 
                     mutating_tools = {"create_file", "edit_file", "write_file", "delete_file", "run_command", "start_dev_server", "stop_dev_server", "draft_implementation_plan"}
 
@@ -383,7 +449,7 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
                             status_txt = f"⚙️ Executing {tool_name}..."
 
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({"type": "status", "content": status_txt}),
+                            safe_send({"type": "status", "content": status_txt}),
                             loop
                         )
 
@@ -395,12 +461,12 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
 
                             # Notify status spinner of approval prompt
                             asyncio.run_coroutine_threadsafe(
-                                websocket.send_json({"type": "status", "content": f"⚠️ Waiting for approval: {tool_name} {target}"}),
+                                safe_send({"type": "status", "content": f"⚠️ Waiting for approval: {tool_name} {target}"}),
                                 loop
                             )
 
                             asyncio.run_coroutine_threadsafe(
-                                websocket.send_json({
+                                safe_send({
                                     "type": "permission_request",
                                     "request_id": req_id,
                                     "tool": tool_name,
@@ -418,7 +484,7 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
 
                     def on_tool_call(tool_name: str, args: dict, result: str):
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({
+                            safe_send({
                                 "type": "tool_execution",
                                 "tool": tool_name,
                                 "args": args,
@@ -439,13 +505,16 @@ async def websocket_endpoint(websocket: WebSocket, workspace: Optional[str] = Qu
                     except Exception as req_err:
                         response = f"⚠️ System error while executing request: {str(req_err)}"
 
-                    await websocket.send_json({
+                    if core:
+                        core.is_processing = False
+
+                    await safe_send({
                         "type": "assistant_response",
                         "content": response
                     })
 
                     if core:
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "project_state",
                             "content": core.state_manager.read_state()
                         })
